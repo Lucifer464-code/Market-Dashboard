@@ -21,7 +21,7 @@ def _pct_style(val) -> str:
     return ""
 
 
-_RETURN_KEYWORDS = {"change", "return", "chg", "pct", "gain", "perf", "1d", "1w", "1m", "3m", "6m", "ytd", "1y", "3y", "5y"}
+_RETURN_KEYWORDS = {"change", "return", "chg", "pct", "gain", "perf", "1d", "2d", "3d", "4d", "5d", "1w", "1m", "3m", "6m", "ytd", "1y", "3y", "5y"}
 
 
 def _pct_cols(df: pd.DataFrame) -> list[str]:
