@@ -1,0 +1,20 @@
+# Secrets & credentials
+service_account.json
+.streamlit/secrets.toml
+zerodha_access_token.txt
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pkl
+nav_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dev tools
+.claude/
+.superpowers/
