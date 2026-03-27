@@ -138,15 +138,14 @@ def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bo
     )
 
     rows_html = ""
-    for i, (_, row) in enumerate(df.iterrows()):
-        row_bg = "#f8fafc" if i % 2 == 0 else "#ffffff"
+    for _, row in df.iterrows():
         cells = ""
         for j, col in enumerate(df.columns):
             val = row[col]
             align = "center" if col in numeric_cols else "left"
             extra = _pct_style(val) if col in pct_cols else ""
             bold = "font-weight:700;" if (j == 0 and bold_first_col) else ""
-            cells += f'<td style="background:{row_bg};text-align:{align};{bold}{extra}">{val}</td>'
+            cells += f'<td style="text-align:{align};{bold}{extra}">{val}</td>'
         rows_html += f"<tr>{cells}</tr>"
 
     row_count = len(df)
@@ -165,6 +164,8 @@ def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bo
   thead th:hover {{ background:#1e293b; }}
   .sort-icon {{ margin-left:6px; opacity:0.8; font-size:11px; }}
   td {{ padding:8px 14px; border:1px solid #e2e8f0; white-space:nowrap; }}
+  tbody tr:nth-child(odd) td {{ background:#f8fafc; }}
+  tbody tr:nth-child(even) td {{ background:#ffffff; }}
   tr:hover td {{ background:#f1f5f9 !important; }}
   .scroll-wrap {{ overflow:auto; max-height:{frame_height}px;
                   border:1px solid #e2e8f0; border-radius:8px; }}
