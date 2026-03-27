@@ -168,6 +168,9 @@ with st.sidebar:
                 st.rerun()
 
     st.divider()
+    if st.button("Refresh Data", key="refresh_cache", use_container_width=True, type="secondary"):
+        st.cache_data.clear()
+        st.rerun()
     st.markdown(
         "<p style='color:#94a3b8;font-size:10px;padding:0 10px'>Data refreshes daily</p>",
         unsafe_allow_html=True,
