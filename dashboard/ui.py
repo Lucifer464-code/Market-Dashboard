@@ -182,10 +182,21 @@ def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bo
     var tb = document.getElementById('t').tBodies[0];
     var rows = Array.from(tb.rows);
     var asc = dir[col] = !dir[col];
+    function parseVal(v) {{
+      v = v.replace(/[%+,\\s$]/g, '');
+      var m = v.match(/^(-?[\d.]+)([KkMmBb]?)$/);
+      if (!m) return NaN;
+      var n = parseFloat(m[1]);
+      var s = m[2].toUpperCase();
+      if (s === 'K') n *= 1e3;
+      else if (s === 'M') n *= 1e6;
+      else if (s === 'B') n *= 1e9;
+      return n;
+    }}
     rows.sort(function(a, b) {{
-      var av = a.cells[col].innerText.replace(/[%+,\\s]/g,'');
-      var bv = b.cells[col].innerText.replace(/[%+,\\s]/g,'');
-      var an = parseFloat(av), bn = parseFloat(bv);
+      var av = a.cells[col].innerText;
+      var bv = b.cells[col].innerText;
+      var an = parseVal(av), bn = parseVal(bv);
       if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
       return asc ? av.localeCompare(bv) : bv.localeCompare(av);
     }});
