@@ -311,47 +311,12 @@ var isOpen  = false;
   }}
 }})();
 
-function mnToggle() {{
-  if (isOpen) {{ mnClose(); return; }}
-  var pd   = window.parent.document;
-  var rect = window.frameElement ? window.frameElement.getBoundingClientRect() : {{bottom:55,left:0,right:0}};
-
-  // Build items HTML
-  var html = '';
-  for (var i = 0; i < NAV.length; i++) {{
-    html += '<div style="font-size:9px;font-weight:700;color:#475569;letter-spacing:1.5px;text-transform:uppercase;padding:10px 16px 4px">' + NAV[i].group + '</div>';
-    for (var j = 0; j < NAV[i].sections.length; j++) {{
-      var sec    = NAV[i].sections[j];
-      var active = sec === CURRENT ? 'background:#f0f9ff;color:#0ea5e9;border-left-color:#0ea5e9;font-weight:600;' : '';
-      html += '<div onclick="mnSelect(' + JSON.stringify(sec) + ')" style="padding:9px 16px;font-size:13px;color:#334155;cursor:pointer;border-left:3px solid transparent;' + active + '">' + sec + '</div>';
-    }}
-  }}
-
-  // Overlay in parent
-  var ov = pd.createElement('div');
-  ov.id  = 'mnOv';
-  ov.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:99998;';
-  ov.onclick = function() {{ mnClose(); }};
-  pd.body.appendChild(ov);
-
-  // Dropdown in parent
-  var dd = pd.createElement('div');
-  dd.id  = 'mnDd';
-  dd.style.cssText = 'position:fixed;top:' + (rect.bottom + 4) + 'px;left:8px;right:8px;' +
-    'background:white;border:1px solid #e2e8f0;border-radius:10px;' +
-    'box-shadow:0 8px 24px rgba(0,0,0,0.12);z-index:99999;max-height:70vh;overflow-y:auto;';
-  dd.innerHTML = html;
-  pd.body.appendChild(dd);
-
-  document.getElementById('ch').classList.add('open');
-  isOpen = true;
-}}
-
 function mnClose() {{
   var pd = window.parent.document;
   var d  = pd.getElementById('mnDd'); if (d) d.remove();
   var o  = pd.getElementById('mnOv'); if (o) o.remove();
-  document.getElementById('ch').classList.remove('open');
+  var ch = document.getElementById('ch');
+  if (ch) ch.classList.remove('open');
   isOpen = false;
 }}
 
@@ -363,8 +328,53 @@ function mnSelect(section) {{
   }}
 }}
 
-// Expose so parent-injected HTML onclick can reach them
-window.parent.mnSelect = mnSelect;
-window.parent.mnClose  = mnClose;
+function mnToggle() {{
+  if (isOpen) {{ mnClose(); return; }}
+  var pd   = window.parent.document;
+  var rect = window.frameElement ? window.frameElement.getBoundingClientRect() : {{bottom:55,left:0,right:0}};
+
+  // Build items HTML — use data-sec attribute, NO inline onclick
+  var html = '';
+  for (var i = 0; i < NAV.length; i++) {{
+    html += '<div style="font-size:9px;font-weight:700;color:#475569;letter-spacing:1.5px;text-transform:uppercase;padding:10px 16px 4px">' + NAV[i].group + '</div>';
+    for (var j = 0; j < NAV[i].sections.length; j++) {{
+      var sec    = NAV[i].sections[j];
+      var active = sec === CURRENT ? 'background:#f0f9ff;color:#0ea5e9;border-left-color:#0ea5e9;font-weight:600;' : '';
+      html += '<div data-sec="' + sec.replace(/"/g,'&quot;') + '" style="padding:9px 16px;font-size:13px;color:#334155;cursor:pointer;border-left:3px solid transparent;' + active + '">' + sec + '</div>';
+    }}
+  }}
+
+  // Overlay in parent
+  var ov = pd.createElement('div');
+  ov.id  = 'mnOv';
+  ov.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:99998;';
+  ov.addEventListener('click', function() {{ mnClose(); }});
+  pd.body.appendChild(ov);
+
+  // Dropdown in parent
+  var dd = pd.createElement('div');
+  dd.id  = 'mnDd';
+  dd.style.cssText = 'position:fixed;top:' + (rect.bottom + 4) + 'px;left:8px;right:8px;' +
+    'background:white;border:1px solid #e2e8f0;border-radius:10px;' +
+    'box-shadow:0 8px 24px rgba(0,0,0,0.12);z-index:99999;max-height:70vh;overflow-y:auto;';
+  dd.innerHTML = html;
+
+  // Attach click listener from THIS iframe's scope — avoids cross-context issues
+  dd.addEventListener('click', function(e) {{
+    var t = e.target;
+    while (t && t !== dd) {{
+      if (t.hasAttribute('data-sec')) {{
+        mnSelect(t.getAttribute('data-sec'));
+        return;
+      }}
+      t = t.parentElement;
+    }}
+  }});
+
+  pd.body.appendChild(dd);
+
+  document.getElementById('ch').classList.add('open');
+  isOpen = true;
+}}
 </script>
 </body></html>""", height=55)
