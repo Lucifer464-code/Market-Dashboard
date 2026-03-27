@@ -99,23 +99,30 @@ def render_stat_cards(df: pd.DataFrame, secondary_df: pd.DataFrame | None = None
         return rows
 
     if secondary_df is not None and not secondary_df.empty:
-        primary_rows = _get_rows(df, 2)
+        primary_rows   = _get_rows(df, 2)
         secondary_rows = _get_rows(secondary_df, 2)
-        cols = st.columns(4)
-        for i, (label, value, change) in enumerate(primary_rows):
-            with cols[i]:
-                st.markdown(_stat_card_html(label, value, change, "#dcfce7"), unsafe_allow_html=True)
-        for i, (label, value, change) in enumerate(secondary_rows):
-            with cols[2 + i]:
-                st.markdown(_stat_card_html(label, value, change, "#fef2f2"), unsafe_allow_html=True)
+        cards_html = (
+            "".join(_stat_card_html(l, v, c, "#dcfce7") for l, v, c in primary_rows)
+            + "".join(_stat_card_html(l, v, c, "#fef2f2") for l, v, c in secondary_rows)
+        )
     else:
         rows = _get_rows(df, 4)
-        cols = st.columns(len(rows)) if rows else []
-        for i, (label, value, change) in enumerate(rows):
-            with cols[i]:
-                st.markdown(_stat_card_html(label, value, change), unsafe_allow_html=True)
+        cards_html = "".join(_stat_card_html(l, v, c) for l, v, c in rows)
 
-    st.markdown("<div style='margin-bottom:16px'></div>", unsafe_allow_html=True)
+    st.markdown(f"""
+<style>
+.ifpl-stat-grid {{
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 16px;
+}}
+@media (max-width: 768px) {{
+  .ifpl-stat-grid {{ grid-template-columns: repeat(2, 1fr); }}
+}}
+</style>
+<div class="ifpl-stat-grid">{cards_html}</div>
+""", unsafe_allow_html=True)
 
 
 def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bool = True):
