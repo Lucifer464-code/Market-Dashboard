@@ -181,6 +181,7 @@ def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bo
   tbody tr:nth-child(even) td {{ background:#ffffff; }}
   tr:hover td {{ background:#f1f5f9 !important; }}
   .scroll-wrap {{ overflow:auto; max-height:{frame_height}px;
+                  max-width:100%; box-sizing:border-box;
                   border:1px solid #e2e8f0; border-radius:8px; }}
 </style></head><body>
 <div class="scroll-wrap">
