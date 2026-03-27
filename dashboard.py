@@ -113,6 +113,11 @@ st.markdown(
     overflow: hidden !important;
 }
 
+/* ── Collapse zero-height component wrappers ── */
+[data-testid="stCustomComponentV1"][style*="height: 0"] {
+    display: none !important;
+}
+
 /* ── Mobile: push sidebar off-screen, keep buttons clickable ── */
 @media (max-width: 768px) {
     [data-testid="stSidebar"] {

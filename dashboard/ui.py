@@ -302,12 +302,18 @@ var NAV     = {_json.dumps(nav_data)};
 var CURRENT = {_json.dumps(current_section)};
 var isOpen  = false;
 
-// Hide on desktop
+// Hide on desktop — collapse iframe and its direct wrapper
 (function() {{
   var w = window.parent ? window.parent.innerWidth : window.innerWidth;
   if (w > 768 && window.frameElement) {{
     window.frameElement.style.height  = '0px';
     window.frameElement.style.display = 'none';
+    var wrapper = window.frameElement.parentElement;
+    if (wrapper) {{
+      wrapper.style.height    = '0px';
+      wrapper.style.minHeight = '0px';
+      wrapper.style.overflow  = 'hidden';
+    }}
   }}
 }})();
 
