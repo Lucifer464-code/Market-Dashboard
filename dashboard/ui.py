@@ -271,7 +271,7 @@ def mobile_nav(current_section: str):
     components.html(f"""<!DOCTYPE html><html><head><style>
 * {{ box-sizing:border-box; margin:0; padding:0; }}
 body {{ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-        background:transparent; overflow:hidden; }}
+        background:transparent; }}
 .mn-bar {{
   background:white; border:1px solid #e2e8f0; border-radius:10px;
   padding:12px 16px; display:flex; align-items:center;
@@ -325,6 +325,8 @@ function mnToggle() {{
   ch.classList.toggle('mn-open');
   if (window.frameElement) {{
     window.frameElement.style.height = (opening ? OPEN_H : CLOSED_H) + 'px';
+    window.frameElement.style.zIndex = opening ? '9999' : '';
+    window.frameElement.style.position = opening ? 'relative' : '';
   }}
 }}
 
@@ -334,6 +336,8 @@ function mnSelectThis(el) {{
   document.getElementById('mnChevron').classList.remove('mn-open');
   if (window.frameElement) {{
     window.frameElement.style.height = CLOSED_H + 'px';
+    window.frameElement.style.zIndex = '';
+    window.frameElement.style.position = '';
   }}
   var btns = window.parent.document.querySelectorAll('[data-testid="stSidebar"] button');
   for (var i = 0; i < btns.length; i++) {{
