@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 _logo_path = Path(__file__).parent.parent / "assets" / "logo.png"
 _logo_b64 = base64.b64encode(_logo_path.read_bytes()).decode() if _logo_path.exists() else ""
 
-AUTH_DURATION = 30 * 24 * 3600  # 30 days
+AUTH_DURATION = 4 * 3600  # 4 hours
 
 
 def _make_token(password: str) -> str:
