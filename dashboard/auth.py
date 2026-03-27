@@ -1,13 +1,11 @@
 import base64
 import hashlib
 import hmac
-import json
 import struct
 import time
 from pathlib import Path
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 _logo_path = Path(__file__).parent.parent / "assets" / "logo.png"
 _logo_b64 = base64.b64encode(_logo_path.read_bytes()).decode() if _logo_path.exists() else ""
@@ -41,21 +39,6 @@ def _is_valid_token(token: str, password: str) -> bool:
 def login_wall() -> bool:
     """Show login screen and return True once authenticated."""
     password = st.secrets["PASSWORD"]
-
-    # On load: read token from localStorage and inject into query params if missing
-    components.html("""
-<script>
-(function() {
-  var tok = localStorage.getItem('ifpl_auth');
-  if (!tok) return;
-  var url = new URL(window.parent.location.href);
-  if (!url.searchParams.get('auth_token')) {
-    url.searchParams.set('auth_token', tok);
-    window.parent.location.replace(url.toString());
-  }
-})();
-</script>
-""", height=0)
 
     token = st.query_params.get("auth_token")
     if token and _is_valid_token(token, password):
@@ -96,13 +79,6 @@ def login_wall() -> bool:
                 token = _make_token(password)
                 st.query_params["auth_token"] = token
                 st.session_state.authenticated = True
-                # Persist token in localStorage so mobile browsers remember it
-                components.html(f"""
-<script>
-localStorage.setItem('ifpl_auth', {json.dumps(token)});
-window.parent.location.reload();
-</script>
-""", height=0)
                 st.rerun()
             else:
                 st.error("Incorrect password")

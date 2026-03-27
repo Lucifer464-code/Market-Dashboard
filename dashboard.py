@@ -15,11 +15,25 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── Clear sidebar localStorage state ───────────────────────
-components.html(
-    "<script>Object.keys(localStorage).filter(k => k.includes('sidebar') || k.includes('Sidebar')).forEach(k => localStorage.removeItem(k));</script>",
-    height=0,
-)
+# ── One-time JS: sidebar cleanup + auth token localStorage sync ─
+components.html("""<script>
+// Clear Streamlit sidebar state
+Object.keys(localStorage).filter(k => k.includes('sidebar') || k.includes('Sidebar')).forEach(k => localStorage.removeItem(k));
+// Auth: if token in URL, persist it; if missing from URL but in storage, inject it
+(function() {
+  var url = new URL(window.parent.location.href);
+  var urlTok = url.searchParams.get('auth_token');
+  if (urlTok) {
+    localStorage.setItem('ifpl_auth', urlTok);
+  } else {
+    var stored = localStorage.getItem('ifpl_auth');
+    if (stored) {
+      url.searchParams.set('auth_token', stored);
+      window.parent.location.replace(url.toString());
+    }
+  }
+})();
+</script>""", height=0)
 
 # ── Logo (base64) ───────────────────────────────────────────
 _logo_path = Path(__file__).parent / "assets" / "logo.png"
@@ -39,9 +53,6 @@ st.markdown(
 <style>
 /* Hide Streamlit chrome */
 #MainMenu, footer, header { visibility: hidden; }
-
-/* Collapse zero-height component iframes (used for JS-only snippets) */
-iframe[height="0"] { display: none !important; }
 
 /* Hide sidebar collapse button */
 [data-testid="stSidebarCollapseButton"] { display: none !important; }
