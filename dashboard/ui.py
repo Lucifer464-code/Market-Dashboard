@@ -302,22 +302,12 @@ var NAV     = {_json.dumps(nav_data)};
 var CURRENT = {_json.dumps(current_section)};
 var isOpen  = false;
 
-// Hide on desktop — collapse iframe AND all parent containers
+// Hide on desktop
 (function() {{
   var w = window.parent ? window.parent.innerWidth : window.innerWidth;
   if (w > 768 && window.frameElement) {{
     window.frameElement.style.height  = '0px';
     window.frameElement.style.display = 'none';
-    var el = window.frameElement;
-    for (var i = 0; i < 6; i++) {{
-      el = el.parentElement;
-      if (!el) break;
-      el.style.height    = '0px';
-      el.style.minHeight = '0px';
-      el.style.overflow  = 'hidden';
-      el.style.margin    = '0px';
-      el.style.padding   = '0px';
-    }}
   }}
 }})();
 
