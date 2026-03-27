@@ -111,7 +111,7 @@ def load_etfs_us():
 @st.cache_data(ttl=28800)
 def load_leveraged_funds():
     ws = _ws("Biggest Leveraged Funds ")   # trailing space is intentional
-    return _range_to_df(ws, "A6:L60", header_idx=0)
+    return _range_to_df(ws, "A6:L122", header_idx=0)
 
 
 @st.cache_data(ttl=28800)
