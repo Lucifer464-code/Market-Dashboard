@@ -110,12 +110,41 @@ st.markdown(
     section[data-testid="stMain"] > div:first-child {
         padding-left: 1rem !important;
         padding-right: 1rem !important;
+        padding-top: 56px !important;
     }
     .ifpl-section-header {
         display: none !important;
     }
+    .ifpl-mobile-header {
+        display: flex !important;
+    }
+}
+.ifpl-mobile-header {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 99990;
+    background: #0f172a;
+    padding: 10px 16px;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid #1e293b;
 }
 </style>
+""",
+    unsafe_allow_html=True,
+)
+
+# ── Mobile fixed header ─────────────────────────────────────
+st.markdown(
+    f"""
+<div class="ifpl-mobile-header">
+  {_logo_img}
+  <div>
+    <div style="color:#f1f5f9;font-size:13px;font-weight:700;letter-spacing:0.3px">IFPL Markets</div>
+    <div style="color:#38bdf8;font-size:10px;font-weight:500;letter-spacing:1px;text-transform:uppercase;margin-top:1px">Market Dashboard</div>
+  </div>
+</div>
 """,
     unsafe_allow_html=True,
 )
