@@ -180,6 +180,11 @@ def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bo
   tbody tr:nth-child(odd) td {{ background:#f8fafc; }}
   tbody tr:nth-child(even) td {{ background:#ffffff; }}
   tr:hover td {{ background:#f1f5f9 !important; }}
+  td:first-child {{ position:sticky; left:0; z-index:1; }}
+  tbody tr:nth-child(odd) td:first-child {{ background:#f8fafc; }}
+  tbody tr:nth-child(even) td:first-child {{ background:#ffffff; }}
+  tr:hover td:first-child {{ background:#f1f5f9 !important; }}
+  th:first-child {{ position:sticky; left:0; z-index:2; }}
   .scroll-wrap {{ overflow:auto; max-height:{frame_height}px;
                   max-width:100%; box-sizing:border-box;
                   border:1px solid #e2e8f0; border-radius:8px; }}
