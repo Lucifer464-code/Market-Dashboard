@@ -302,20 +302,12 @@ var NAV     = {_json.dumps(nav_data)};
 var CURRENT = {_json.dumps(current_section)};
 var isOpen  = false;
 
-// Hide on desktop — collapse iframe + stCustomComponentV1 + stElementContainer
+// Hide on desktop — display:none removes it from flex layout entirely (no gap)
 (function() {{
   var w = window.parent ? window.parent.innerWidth : window.innerWidth;
   if (w > 768 && window.frameElement) {{
-    window.frameElement.style.height  = '0px';
-    window.frameElement.style.display = 'none';
-    var p = window.frameElement.parentElement;   // stCustomComponentV1
-    if (p) {{
-      p.style.height = '0px'; p.style.minHeight = '0px'; p.style.overflow = 'hidden';
-      var pp = p.parentElement;                  // stElementContainer
-      if (pp) {{
-        pp.style.height = '0px'; pp.style.minHeight = '0px'; pp.style.overflow = 'hidden';
-      }}
-    }}
+    var p = window.frameElement.parentElement;  // stCustomComponentV1
+    if (p) p.style.display = 'none';
   }}
 }})();
 
