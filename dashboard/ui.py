@@ -302,17 +302,19 @@ var NAV     = {_json.dumps(nav_data)};
 var CURRENT = {_json.dumps(current_section)};
 var isOpen  = false;
 
-// Hide on desktop — collapse iframe and its direct wrapper
+// Hide on desktop — collapse iframe + stCustomComponentV1 + stElementContainer
 (function() {{
   var w = window.parent ? window.parent.innerWidth : window.innerWidth;
   if (w > 768 && window.frameElement) {{
     window.frameElement.style.height  = '0px';
     window.frameElement.style.display = 'none';
-    var wrapper = window.frameElement.parentElement;
-    if (wrapper) {{
-      wrapper.style.height    = '0px';
-      wrapper.style.minHeight = '0px';
-      wrapper.style.overflow  = 'hidden';
+    var p = window.frameElement.parentElement;   // stCustomComponentV1
+    if (p) {{
+      p.style.height = '0px'; p.style.minHeight = '0px'; p.style.overflow = 'hidden';
+      var pp = p.parentElement;                  // stElementContainer
+      if (pp) {{
+        pp.style.height = '0px'; pp.style.minHeight = '0px'; pp.style.overflow = 'hidden';
+      }}
     }}
   }}
 }})();
