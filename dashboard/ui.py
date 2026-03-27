@@ -275,26 +275,14 @@ def secondary_label(text: str):
 
 
 def mobile_nav(current_section: str):
-    """Dropdown nav bar rendered via components.html so JS executes.
-    Hidden on desktop (≥769px) via window.frameElement height=0."""
-    items_html = ""
-    for group, sections in _NAV_GROUPS.items():
-        items_html += f'<div class="mn-group">{group}</div>'
-        for sec in sections:
-            active_cls = "mn-active" if sec == current_section else ""
-            items_html += (
-                f'<div class="mn-item {active_cls}" '
-                f'data-section="{sec}" onclick="mnSelectThis(this)">'
-                f'{sec}</div>'
-            )
-
-    # Approx open height: trigger(55) + groups(3×28) + items(12×38) + padding
-    open_h = 55 + 3 * 28 + 12 * 38 + 20
+    """Trigger bar in iframe; dropdown injected into parent page DOM as
+    position:fixed so it floats above all Streamlit content."""
+    import json as _json
+    nav_data = [{"group": g, "sections": s} for g, s in _NAV_GROUPS.items()]
 
     components.html(f"""<!DOCTYPE html><html><head><style>
 * {{ box-sizing:border-box; margin:0; padding:0; }}
-body {{ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-        background:transparent; }}
+body {{ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:transparent; }}
 .mn-bar {{
   background:white; border:1px solid #e2e8f0; border-radius:10px;
   padding:12px 16px; display:flex; align-items:center;
@@ -303,72 +291,80 @@ body {{ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 .mn-title {{ font-size:16px; font-weight:700; color:#0f172a; }}
 .mn-chevron {{ font-size:12px; color:#64748b; margin-left:6px;
                display:inline-block; transition:transform 0.2s; }}
-.mn-chevron.mn-open {{ transform:rotate(180deg); }}
-.mn-dropdown {{
-  display:none; background:white; border:1px solid #e2e8f0; border-radius:10px;
-  box-shadow:0 8px 24px rgba(0,0,0,0.12); margin-top:4px; overflow-y:auto;
-}}
-.mn-dropdown.mn-open {{ display:block; }}
-.mn-group {{
-  font-size:9px; font-weight:700; color:#475569;
-  letter-spacing:1.5px; text-transform:uppercase; padding:10px 16px 4px;
-}}
-.mn-item {{
-  padding:9px 16px; font-size:13px; color:#334155;
-  cursor:pointer; border-left:3px solid transparent;
-}}
-.mn-item.mn-active {{
-  background:#f0f9ff; color:#0ea5e9;
-  border-left-color:#0ea5e9; font-weight:600;
-}}
-.mn-item:hover {{ background:#f8fafc; }}
+.mn-chevron.open {{ transform:rotate(180deg); }}
 </style></head><body>
 <div class="mn-bar" onclick="mnToggle()">
   <span class="mn-title">{current_section}</span>
-  <span class="mn-chevron" id="mnChevron">▾</span>
+  <span class="mn-chevron" id="ch">▾</span>
 </div>
-<div class="mn-dropdown" id="mnDropdown">{items_html}</div>
 <script>
-var CLOSED_H = 55, OPEN_H = {open_h};
+var NAV     = {_json.dumps(nav_data)};
+var CURRENT = {_json.dumps(current_section)};
+var isOpen  = false;
 
-// Hide entirely on desktop
+// Hide on desktop
 (function() {{
   var w = window.parent ? window.parent.innerWidth : window.innerWidth;
   if (w > 768 && window.frameElement) {{
-    window.frameElement.style.height = '0px';
+    window.frameElement.style.height  = '0px';
     window.frameElement.style.display = 'none';
   }}
 }})();
 
 function mnToggle() {{
-  var dd = document.getElementById('mnDropdown');
-  var ch = document.getElementById('mnChevron');
-  var opening = !dd.classList.contains('mn-open');
-  dd.classList.toggle('mn-open');
-  ch.classList.toggle('mn-open');
-  if (window.frameElement) {{
-    window.frameElement.style.height = (opening ? OPEN_H : CLOSED_H) + 'px';
-    window.frameElement.style.zIndex = opening ? '9999' : '';
-    window.frameElement.style.position = opening ? 'relative' : '';
+  if (isOpen) {{ mnClose(); return; }}
+  var pd   = window.parent.document;
+  var rect = window.frameElement ? window.frameElement.getBoundingClientRect() : {{bottom:55,left:0,right:0}};
+
+  // Build items HTML
+  var html = '';
+  for (var i = 0; i < NAV.length; i++) {{
+    html += '<div style="font-size:9px;font-weight:700;color:#475569;letter-spacing:1.5px;text-transform:uppercase;padding:10px 16px 4px">' + NAV[i].group + '</div>';
+    for (var j = 0; j < NAV[i].sections.length; j++) {{
+      var sec    = NAV[i].sections[j];
+      var active = sec === CURRENT ? 'background:#f0f9ff;color:#0ea5e9;border-left-color:#0ea5e9;font-weight:600;' : '';
+      html += '<div onclick="mnSelect(' + JSON.stringify(sec) + ')" style="padding:9px 16px;font-size:13px;color:#334155;cursor:pointer;border-left:3px solid transparent;' + active + '">' + sec + '</div>';
+    }}
+  }}
+
+  // Overlay in parent
+  var ov = pd.createElement('div');
+  ov.id  = 'mnOv';
+  ov.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:99998;';
+  ov.onclick = function() {{ mnClose(); }};
+  pd.body.appendChild(ov);
+
+  // Dropdown in parent
+  var dd = pd.createElement('div');
+  dd.id  = 'mnDd';
+  dd.style.cssText = 'position:fixed;top:' + (rect.bottom + 4) + 'px;left:8px;right:8px;' +
+    'background:white;border:1px solid #e2e8f0;border-radius:10px;' +
+    'box-shadow:0 8px 24px rgba(0,0,0,0.12);z-index:99999;max-height:70vh;overflow-y:auto;';
+  dd.innerHTML = html;
+  pd.body.appendChild(dd);
+
+  document.getElementById('ch').classList.add('open');
+  isOpen = true;
+}}
+
+function mnClose() {{
+  var pd = window.parent.document;
+  var d  = pd.getElementById('mnDd'); if (d) d.remove();
+  var o  = pd.getElementById('mnOv'); if (o) o.remove();
+  document.getElementById('ch').classList.remove('open');
+  isOpen = false;
+}}
+
+function mnSelect(section) {{
+  mnClose();
+  var btns = window.parent.document.querySelectorAll('[data-testid="stSidebar"] button');
+  for (var i = 0; i < btns.length; i++) {{
+    if (btns[i].innerText.trim() === section) {{ btns[i].click(); return; }}
   }}
 }}
 
-function mnSelectThis(el) {{
-  var section = el.getAttribute('data-section');
-  document.getElementById('mnDropdown').classList.remove('mn-open');
-  document.getElementById('mnChevron').classList.remove('mn-open');
-  if (window.frameElement) {{
-    window.frameElement.style.height = CLOSED_H + 'px';
-    window.frameElement.style.zIndex = '';
-    window.frameElement.style.position = '';
-  }}
-  var btns = window.parent.document.querySelectorAll('[data-testid="stSidebar"] button');
-  for (var i = 0; i < btns.length; i++) {{
-    if (btns[i].innerText.trim() === section) {{
-      btns[i].click();
-      return;
-    }}
-  }}
-}}
+// Expose so parent-injected HTML onclick can reach them
+window.parent.mnSelect = mnSelect;
+window.parent.mnClose  = mnClose;
 </script>
 </body></html>""", height=55)
