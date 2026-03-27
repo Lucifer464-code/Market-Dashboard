@@ -244,6 +244,24 @@ def section_header(title: str, subtitle: str = ""):
     )
 
 
+def sort_by_keyword(df: pd.DataFrame, keyword: str) -> pd.DataFrame:
+    """Return df sorted descending by first column whose name contains keyword."""
+    for col in df.columns:
+        if keyword.lower() in col.lower():
+            try:
+                numeric = pd.to_numeric(
+                    df[col].astype(str)
+                        .str.replace("%", "", regex=False)
+                        .str.replace("+", "", regex=False)
+                        .str.strip(),
+                    errors="coerce",
+                )
+                return df.iloc[numeric.sort_values(ascending=False, na_position="last").index].reset_index(drop=True)
+            except Exception:
+                pass
+    return df
+
+
 def secondary_label(text: str):
     st.markdown(
         f"<p style='font-size:13px;font-weight:600;color:#0f172a;margin:16px 0 8px'>{text}</p>",
