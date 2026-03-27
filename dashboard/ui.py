@@ -198,7 +198,7 @@ def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bo
     var asc = dir[col] = !dir[col];
     function parseVal(v) {{
       v = v.replace(/[%+,\\s$]/g, '');
-      var m = v.match(/^(-?[\d.]+)([KkMmBb]?)$/);
+      var m = v.match(/^(-?[\\d.]+)([KkMmBb]?)$/);
       if (!m) return NaN;
       var n = parseFloat(m[1]);
       var s = m[2].toUpperCase();
@@ -252,7 +252,8 @@ def secondary_label(text: str):
 
 
 def mobile_nav(current_section: str):
-    """Floating dropdown nav bar — visible only on mobile (≤768px)."""
+    """Dropdown nav bar rendered via components.html so JS executes.
+    Hidden on desktop (≥769px) via window.frameElement height=0."""
     items_html = ""
     for group, sections in _NAV_GROUPS.items():
         items_html += f'<div class="mn-group">{group}</div>'
@@ -264,31 +265,25 @@ def mobile_nav(current_section: str):
                 f'{sec}</div>'
             )
 
-    st.markdown(f"""
-<style>
-.mn-wrap {{ display:none; }}
-@media (max-width:768px) {{
-  .mn-wrap {{ display:block; position:relative; z-index:100; margin-bottom:12px; }}
-}}
+    # Approx open height: trigger(55) + groups(3×28) + items(12×38) + padding
+    open_h = 55 + 3 * 28 + 12 * 38 + 20
+
+    components.html(f"""<!DOCTYPE html><html><head><style>
+* {{ box-sizing:border-box; margin:0; padding:0; }}
+body {{ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+        background:transparent; overflow:hidden; }}
 .mn-bar {{
   background:white; border:1px solid #e2e8f0; border-radius:10px;
   padding:12px 16px; display:flex; align-items:center;
   justify-content:space-between; cursor:pointer; user-select:none;
 }}
 .mn-title {{ font-size:16px; font-weight:700; color:#0f172a; }}
-.mn-chevron {{ font-size:12px; color:#64748b; display:inline-block;
-               transition:transform 0.2s; margin-left:6px; }}
+.mn-chevron {{ font-size:12px; color:#64748b; margin-left:6px;
+               display:inline-block; transition:transform 0.2s; }}
 .mn-chevron.mn-open {{ transform:rotate(180deg); }}
-.mn-overlay {{
-  display:none; position:fixed; top:0; left:0; right:0; bottom:0;
-  background:rgba(15,23,42,0.3); z-index:99;
-}}
-.mn-overlay.mn-open {{ display:block; }}
 .mn-dropdown {{
-  display:none; position:absolute; left:0; right:0; top:calc(100% + 4px);
-  background:white; border:1px solid #e2e8f0; border-radius:10px;
-  box-shadow:0 8px 24px rgba(0,0,0,0.12); z-index:100;
-  max-height:70vh; overflow-y:auto;
+  display:none; background:white; border:1px solid #e2e8f0; border-radius:10px;
+  box-shadow:0 8px 24px rgba(0,0,0,0.12); margin-top:4px; overflow-y:auto;
 }}
 .mn-dropdown.mn-open {{ display:block; }}
 .mn-group {{
@@ -304,32 +299,43 @@ def mobile_nav(current_section: str):
   border-left-color:#0ea5e9; font-weight:600;
 }}
 .mn-item:hover {{ background:#f8fafc; }}
-</style>
-<div class="mn-wrap">
-  <div class="mn-overlay" id="mnOverlay" onclick="mnClose()"></div>
-  <div class="mn-bar" onclick="mnToggle()">
-    <span class="mn-title">{current_section}</span>
-    <span class="mn-chevron" id="mnChevron">▾</span>
-  </div>
-  <div class="mn-dropdown" id="mnDropdown">
-    {items_html}
-  </div>
+</style></head><body>
+<div class="mn-bar" onclick="mnToggle()">
+  <span class="mn-title">{current_section}</span>
+  <span class="mn-chevron" id="mnChevron">▾</span>
 </div>
+<div class="mn-dropdown" id="mnDropdown">{items_html}</div>
 <script>
+var CLOSED_H = 55, OPEN_H = {open_h};
+
+// Hide entirely on desktop
+(function() {{
+  var w = window.parent ? window.parent.innerWidth : window.innerWidth;
+  if (w > 768 && window.frameElement) {{
+    window.frameElement.style.height = '0px';
+    window.frameElement.style.display = 'none';
+  }}
+}})();
+
 function mnToggle() {{
-  document.getElementById('mnDropdown').classList.toggle('mn-open');
-  document.getElementById('mnChevron').classList.toggle('mn-open');
-  document.getElementById('mnOverlay').classList.toggle('mn-open');
+  var dd = document.getElementById('mnDropdown');
+  var ch = document.getElementById('mnChevron');
+  var opening = !dd.classList.contains('mn-open');
+  dd.classList.toggle('mn-open');
+  ch.classList.toggle('mn-open');
+  if (window.frameElement) {{
+    window.frameElement.style.height = (opening ? OPEN_H : CLOSED_H) + 'px';
+  }}
 }}
-function mnClose() {{
+
+function mnSelectThis(el) {{
+  var section = el.getAttribute('data-section');
   document.getElementById('mnDropdown').classList.remove('mn-open');
   document.getElementById('mnChevron').classList.remove('mn-open');
-  document.getElementById('mnOverlay').classList.remove('mn-open');
-}}
-function mnSelectThis(el) {{
-  mnClose();
-  var section = el.getAttribute('data-section');
-  var btns = document.querySelectorAll('[data-testid="stSidebar"] button');
+  if (window.frameElement) {{
+    window.frameElement.style.height = CLOSED_H + 'px';
+  }}
+  var btns = window.parent.document.querySelectorAll('[data-testid="stSidebar"] button');
   for (var i = 0; i < btns.length; i++) {{
     if (btns[i].innerText.trim() === section) {{
       btns[i].click();
@@ -338,4 +344,4 @@ function mnSelectThis(el) {{
   }}
 }}
 </script>
-""", unsafe_allow_html=True)
+</body></html>""", height=55)
