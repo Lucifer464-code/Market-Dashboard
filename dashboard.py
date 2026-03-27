@@ -98,6 +98,23 @@ st.markdown(
     border-radius: 10px !important;
     overflow: hidden !important;
 }
+
+/* ── Mobile: push sidebar off-screen, keep buttons clickable ── */
+@media (max-width: 768px) {
+    [data-testid="stSidebar"] {
+        position: fixed !important;
+        left: -9999px !important;
+        width: 1px !important;
+        overflow: hidden !important;
+    }
+    section[data-testid="stMain"] > div:first-child {
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+    }
+    .ifpl-section-header {
+        display: none !important;
+    }
+}
 </style>
 """,
     unsafe_allow_html=True,
