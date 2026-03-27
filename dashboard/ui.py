@@ -7,6 +7,12 @@ import streamlit.components.v1 as components
 GREEN = "#34a853"
 RED   = "#ea4335"
 
+_NAV_GROUPS = {
+    "MARKETS": ["Global Indices", "NIFTY Sectors", "NIFTY Indices"],
+    "ASSETS":  ["ETFs US", "Leveraged Funds", "ETFs India", "Mutual Funds India", "Crypto"],
+    "STOCKS":  ["Gainers & Losers US", "Gainers & Losers India", "ATH US", "ATH India"],
+}
+
 
 def _pct_style(val) -> str:
     """Return CSS color rule for a percentage cell value."""
@@ -214,7 +220,7 @@ def section_header(title: str, subtitle: str = ""):
     sub_html = f"<div style='font-size:12px;color:#94a3b8;margin-top:2px'>{subtitle}</div>" if subtitle else ""
     st.markdown(
         f"""
-        <div style="background:white;border-bottom:1px solid #e2e8f0;padding:14px 0;
+        <div class="ifpl-section-header" style="background:white;border-bottom:1px solid #e2e8f0;padding:14px 0;
                     display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
           <div>
             <div style="font-size:18px;font-weight:700;color:#0f172a">{title}</div>
@@ -235,3 +241,93 @@ def secondary_label(text: str):
         f"<p style='font-size:13px;font-weight:600;color:#0f172a;margin:16px 0 8px'>{text}</p>",
         unsafe_allow_html=True,
     )
+
+
+def mobile_nav(current_section: str):
+    """Floating dropdown nav bar — visible only on mobile (≤768px)."""
+    items_html = ""
+    for group, sections in _NAV_GROUPS.items():
+        items_html += f'<div class="mn-group">{group}</div>'
+        for sec in sections:
+            active_cls = "mn-active" if sec == current_section else ""
+            items_html += (
+                f'<div class="mn-item {active_cls}" '
+                f'data-section="{sec}" onclick="mnSelectThis(this)">'
+                f'{sec}</div>'
+            )
+
+    st.markdown(f"""
+<style>
+.mn-wrap {{ display:none; }}
+@media (max-width:768px) {{
+  .mn-wrap {{ display:block; position:relative; z-index:100; margin-bottom:12px; }}
+}}
+.mn-bar {{
+  background:white; border:1px solid #e2e8f0; border-radius:10px;
+  padding:12px 16px; display:flex; align-items:center;
+  justify-content:space-between; cursor:pointer; user-select:none;
+}}
+.mn-title {{ font-size:16px; font-weight:700; color:#0f172a; }}
+.mn-chevron {{ font-size:12px; color:#64748b; display:inline-block;
+               transition:transform 0.2s; margin-left:6px; }}
+.mn-chevron.mn-open {{ transform:rotate(180deg); }}
+.mn-overlay {{
+  display:none; position:fixed; top:0; left:0; right:0; bottom:0;
+  background:rgba(15,23,42,0.3); z-index:99;
+}}
+.mn-overlay.mn-open {{ display:block; }}
+.mn-dropdown {{
+  display:none; position:absolute; left:0; right:0; top:calc(100% + 4px);
+  background:white; border:1px solid #e2e8f0; border-radius:10px;
+  box-shadow:0 8px 24px rgba(0,0,0,0.12); z-index:100;
+  max-height:70vh; overflow-y:auto;
+}}
+.mn-dropdown.mn-open {{ display:block; }}
+.mn-group {{
+  font-size:9px; font-weight:700; color:#475569;
+  letter-spacing:1.5px; text-transform:uppercase; padding:10px 16px 4px;
+}}
+.mn-item {{
+  padding:9px 16px; font-size:13px; color:#334155;
+  cursor:pointer; border-left:3px solid transparent;
+}}
+.mn-item.mn-active {{
+  background:#f0f9ff; color:#0ea5e9;
+  border-left-color:#0ea5e9; font-weight:600;
+}}
+.mn-item:hover {{ background:#f8fafc; }}
+</style>
+<div class="mn-wrap">
+  <div class="mn-overlay" id="mnOverlay" onclick="mnClose()"></div>
+  <div class="mn-bar" onclick="mnToggle()">
+    <span class="mn-title">{current_section}</span>
+    <span class="mn-chevron" id="mnChevron">▾</span>
+  </div>
+  <div class="mn-dropdown" id="mnDropdown">
+    {items_html}
+  </div>
+</div>
+<script>
+function mnToggle() {{
+  document.getElementById('mnDropdown').classList.toggle('mn-open');
+  document.getElementById('mnChevron').classList.toggle('mn-open');
+  document.getElementById('mnOverlay').classList.toggle('mn-open');
+}}
+function mnClose() {{
+  document.getElementById('mnDropdown').classList.remove('mn-open');
+  document.getElementById('mnChevron').classList.remove('mn-open');
+  document.getElementById('mnOverlay').classList.remove('mn-open');
+}}
+function mnSelectThis(el) {{
+  mnClose();
+  var section = el.getAttribute('data-section');
+  var btns = document.querySelectorAll('[data-testid="stSidebar"] button');
+  for (var i = 0; i < btns.length; i++) {{
+    if (btns[i].innerText.trim() === section) {{
+      btns[i].click();
+      return;
+    }}
+  }}
+}}
+</script>
+""", unsafe_allow_html=True)

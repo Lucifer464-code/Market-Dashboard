@@ -193,6 +193,9 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
+# ── Mobile nav ──────────────────────────────────────────────
+ui.mobile_nav(st.session_state.section)
+
 # ── Main content ────────────────────────────────────────────
 section = st.session_state.section
 
