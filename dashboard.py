@@ -40,6 +40,9 @@ st.markdown(
 /* Hide Streamlit chrome */
 #MainMenu, footer, header { visibility: hidden; }
 
+/* Collapse zero-height component iframes (used for JS-only snippets) */
+iframe[height="0"] { display: none !important; }
+
 /* Hide sidebar collapse button */
 [data-testid="stSidebarCollapseButton"] { display: none !important; }
 
