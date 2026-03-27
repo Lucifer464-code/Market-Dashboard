@@ -33,6 +33,21 @@ Object.keys(localStorage).filter(k => k.includes('sidebar') || k.includes('Sideb
     }
   }
 })();
+// Collapse this iframe and all its parent containers
+(function() {
+  var el = window.frameElement;
+  if (!el) return;
+  el.style.display = 'none';
+  for (var i = 0; i < 6; i++) {
+    el = el.parentElement;
+    if (!el) break;
+    el.style.height    = '0px';
+    el.style.minHeight = '0px';
+    el.style.overflow  = 'hidden';
+    el.style.margin    = '0px';
+    el.style.padding   = '0px';
+  }
+})();
 </script>""", height=0)
 
 # ── Logo (base64) ───────────────────────────────────────────
