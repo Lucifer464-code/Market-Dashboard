@@ -202,28 +202,33 @@ section = st.session_state.section
 if section == "Global Indices":
     ui.section_header("Global Indices", "Major market indices worldwide")
     t1, t2 = data.load_global_indices()
+    t1 = ui.sort_by_keyword(t1, "5d")
+    t2 = ui.sort_by_keyword(t2, "5d") if not t2.empty else t2
     ui.render_stat_cards(t1)
-    ui.render_table(ui.sort_by_keyword(t1, "5d"), bold_first_col=False)
+    ui.render_table(t1, bold_first_col=False)
     if not t2.empty:
         ui.secondary_label("More Indices")
-        ui.render_table(ui.sort_by_keyword(t2, "5d"), height=600, bold_first_col=False)
+        ui.render_table(t2, height=600, bold_first_col=False)
 
 elif section == "NIFTY Indices":
     ui.section_header("NIFTY Indices", "NSE India index returns")
     t1, t2 = data.load_nifty_indices()
     t1 = t1.drop(t1.columns[1], axis=1)
     t2 = t2.drop(t2.columns[1], axis=1) if not t2.empty else t2
+    t1 = ui.sort_by_keyword(t1, "5d")
+    t2 = ui.sort_by_keyword(t2, "5d") if not t2.empty else t2
     ui.render_stat_cards(t1)
-    ui.render_table(ui.sort_by_keyword(t1, "5d"), bold_first_col=False)
+    ui.render_table(t1, bold_first_col=False)
     if not t2.empty:
-        ui.render_table(ui.sort_by_keyword(t2, "5d"), bold_first_col=False)
+        ui.render_table(t2, bold_first_col=False)
 
 elif section == "NIFTY Sectors":
     ui.section_header("NIFTY Sectors", "Sector-wise returns — India")
     df = data.load_nifty_sectors()
     df = df.drop(df.columns[1], axis=1)
+    df = ui.sort_by_keyword(df, "5d")
     ui.render_stat_cards(df)
-    ui.render_table(ui.sort_by_keyword(df, "5d"), bold_first_col=False)
+    ui.render_table(df, bold_first_col=False)
 
 elif section == "ETFs US":
     ui.section_header("ETFs US", "Top US ETFs by AUM")
