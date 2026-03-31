@@ -132,7 +132,7 @@ class StocksDataEngine:
 
     # ── Batch settings ────────────────────────────────────────
     PRICE_BATCH_SIZE = 500   # larger batches = fewer round trips
-    MCAP_WORKERS     = 50    # parallel threads for market cap prefetch
+    MCAP_WORKERS     = 8     # parallel threads for market cap prefetch (too high triggers 401)
 
     HEADERS = {
         "User-Agent": (
@@ -321,11 +321,14 @@ class StocksDataEngine:
         print(f"  Fetching market caps for {len(tickers)} tickers (parallel)...")
 
         def _get(symbol):
-            try:
-                mcap = yf.Ticker(symbol).fast_info.market_cap
-                return symbol, float(mcap) if mcap else None
-            except Exception:
-                return symbol, None
+            for attempt in range(3):
+                try:
+                    mcap = yf.Ticker(symbol).fast_info.market_cap
+                    return symbol, float(mcap) if mcap else None
+                except Exception:
+                    if attempt < 2:
+                        time.sleep(1 + attempt)
+            return symbol, None
 
         mcap_map = {}
         with ThreadPoolExecutor(max_workers=self.MCAP_WORKERS) as pool:
