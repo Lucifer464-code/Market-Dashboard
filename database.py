@@ -115,15 +115,32 @@ class ReturnCalculator:
                 return None
             return eligible_bwd.iloc[-1]
 
+        def price_n_trading_days_ago(n):
+            # If today's partial candle is present, exclude it so we anchor to last confirmed close
+            if len(s_naive) > 0 and s_naive.index[-1].normalize() == today:
+                last_confirmed_idx = len(s_naive) - 2
+            else:
+                last_confirmed_idx = len(s_naive) - 1
+            target_idx = last_confirmed_idx - n
+            if target_idx < 0 or last_confirmed_idx < 0:
+                return None
+            return float(s_naive.iloc[target_idx])
+
         def ret(target_date):
             past_price = price_at(target_date)
             if past_price is None or past_price == 0:
                 return "NA"
             return (current_price / past_price - 1) * 100
 
+        def ret_by_trading_days(n):
+            past_price = price_n_trading_days_ago(n)
+            if past_price is None or past_price == 0:
+                return "NA"
+            return (current_price / past_price - 1) * 100
+
         return [
             current_price,
-            ret(today - pd.DateOffset(weeks=1)),
+            ret_by_trading_days(5),
             ret(today - pd.DateOffset(months=1)),
             ret(today - pd.DateOffset(months=3)),
             ret(today - pd.DateOffset(months=6)),
