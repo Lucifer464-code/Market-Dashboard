@@ -10,7 +10,7 @@ Standalone script that updates four Google Sheets:
 
 Universes:
   US    : iShares Russell 3000 ETF holdings CSV (~3000 tickers)
-  India : NSE NIFTY 500 constituents CSV (~500 tickers)
+  India : NSE NIFTY Total Market CSV (~1800+ tickers)
 
 Name cache:
   One-time fetch of shortName per ticker via yfinance, saved to
@@ -97,7 +97,7 @@ class GoogleSheetClient:
 
 class StocksDataEngine:
     """
-    Fetches price history for the full Russell 3000 + NIFTY 500 universe,
+    Fetches price history for the full Russell 3000 + NIFTY Total Market universe,
     then derives:
       - Top 15 gainers / losers by 1W return (market cap filtered)
       - Stocks within 1% of their all-time high (market cap filtered)
@@ -114,8 +114,8 @@ class StocksDataEngine:
         "ishares-russell-3000-etf/1467271812596.ajax"
         "?fileType=csv&fileName=IWV_holdings&dataType=fund"
     )
-    NIFTY500_URL = (
-        "https://nsearchives.nseindia.com/content/indices/ind_nifty500list.csv"
+    NIFTY_TOTAL_MARKET_URL = (
+        "https://nsearchives.nseindia.com/content/indices/ind_niftytotalmarket_list.csv"
     )
 
     # ── Market cap floors ─────────────────────────────────────
@@ -124,7 +124,7 @@ class StocksDataEngine:
 
     # ── Universe cache (pickle, 24h TTL) ──────────────────────
     US_CACHE_FILE   = "russell3000_tickers.pkl"
-    IN_CACHE_FILE   = "nifty500_tickers.pkl"
+    IN_CACHE_FILE   = "nifty_total_market_tickers.pkl"
     CACHE_TTL_HOURS = 24
 
     # ── Name cache (CSV, permanent) ───────────────────────────
@@ -250,9 +250,9 @@ class StocksDataEngine:
 
     # ── Universe: NIFTY 500 ───────────────────────────────────
 
-    def _fetch_nifty500(self) -> tuple:
+    def _fetch_nifty_total_market(self) -> tuple:
         """
-        Parse NSE NIFTY 500 CSV.
+        Parse NSE NIFTY Total Market CSV (~1800+ stocks).
         Returns (tickers, name_map) where:
             tickers  : list of yfinance symbols e.g. ["RELIANCE.NS", ...]
             name_map : dict of display ticker -> company name
@@ -271,17 +271,17 @@ class StocksDataEngine:
                 tickers, name_map = cached
                 # Invalidate cache if name_map is empty — forces re-fetch
                 if name_map:
-                    print(f"  NIFTY 500: using cache ({len(tickers)} tickers)")
+                    print(f"  NIFTY Total Market: using cache ({len(tickers)} tickers)")
                     return tickers, name_map
                 else:
-                    print("  NIFTY 500: cache has no names — re-fetching from NSE...")
+                    print("  NIFTY Total Market: cache has no names — re-fetching from NSE...")
             else:
-                print("  NIFTY 500: old cache format — re-fetching from NSE...")
+                print("  NIFTY Total Market: old cache format — re-fetching from NSE...")
 
-        print("  Downloading NIFTY 500 from NSE...")
+        print("  Downloading NIFTY Total Market from NSE...")
         try:
             headers = {**self.HEADERS, "Referer": "https://www.nseindia.com/"}
-            r = requests.get(self.NIFTY500_URL, headers=headers, timeout=20)
+            r = requests.get(self.NIFTY_TOTAL_MARKET_URL, headers=headers, timeout=20)
             r.raise_for_status()
 
             df = pd.read_csv(io.StringIO(r.text))
@@ -303,12 +303,12 @@ class StocksDataEngine:
 
             tickers = (df["Symbol"] + ".NS").tolist()
 
-            print(f"  NIFTY 500: {len(tickers)} tickers, {len(name_map)} names loaded from CSV")
+            print(f"  NIFTY Total Market: {len(tickers)} tickers, {len(name_map)} names loaded from CSV")
             self._save_pkl_cache(self.IN_CACHE_FILE, (tickers, name_map))
             return tickers, name_map
 
         except Exception as e:
-            print(f"  [ERROR] NIFTY 500 fetch failed: {e}")
+            print(f"  [ERROR] NIFTY Total Market fetch failed: {e}")
             return [], {}
 
     # ── Market cap prefetch ───────────────────────────────────
@@ -835,8 +835,8 @@ class StocksDataEngine:
         print()
 
         # ── India ─────────────────────────────────────────────
-        print("--- India (NIFTY 500) ---")
-        in_tickers, in_name_map = self._fetch_nifty500()
+        print("--- India (NIFTY Total Market) ---")
+        in_tickers, in_name_map = self._fetch_nifty_total_market()
 
         if in_tickers:
             # Always overwrite from NSE CSV — authoritative source,
