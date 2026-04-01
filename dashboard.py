@@ -1,5 +1,6 @@
 import base64
 from datetime import datetime
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -10,18 +11,37 @@ from dashboard.auth import login_wall
 from dashboard import data, ui
 
 
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
 def _pop_date(df: pd.DataFrame) -> tuple[pd.DataFrame, str | None]:
-    """Remove the Date column from df and return (df_without_date, formatted_date_str)."""
+    """Remove the Date column from df and return (df_without_date, formatted_date_str).
+
+    Tries two strategies:
+    1. Column whose name contains 'date' (case-insensitive).
+    2. Column whose values are all ISO dates (YYYY-MM-DD).
+    """
+    def _fmt(val: str) -> str:
+        try:
+            return datetime.strptime(val, "%Y-%m-%d").strftime("%b %d, %Y")
+        except Exception:
+            return val
+
+    # Strategy 1: column name contains "date"
     for col in df.columns:
-        if col.strip().lower() == "date":
-            vals = df[col].replace("", pd.NA).dropna()
-            date_str = None
-            if not vals.empty:
-                try:
-                    date_str = datetime.strptime(str(vals.iloc[0]), "%Y-%m-%d").strftime("%b %d, %Y")
-                except Exception:
-                    date_str = str(vals.iloc[0])
+        if "date" in col.strip().lower():
+            vals = df[col].astype(str).str.strip()
+            vals = vals[vals.str.match(_ISO_DATE)]
+            date_str = _fmt(vals.iloc[0]) if not vals.empty else None
             return df.drop(columns=[col]), date_str
+
+    # Strategy 2: column where ≥80 % of values look like ISO dates
+    for col in df.columns:
+        vals = df[col].astype(str).str.strip()
+        hits = vals[vals.str.match(_ISO_DATE)]
+        if len(hits) >= max(1, len(df) * 0.8):
+            return df.drop(columns=[col]), _fmt(hits.iloc[0])
+
     return df, None
 
 # ── Page config ────────────────────────────────────────────
