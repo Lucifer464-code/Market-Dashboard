@@ -353,8 +353,9 @@ class StocksDataEngine:
             Ticker | MarketCap | Price | ATH | PctFromATH |
             Change1W | Change1M | Change3M | Change6M | Change1Y | Change3Y
         """
-        all_rows = []
-        batches  = [
+        all_rows  = []
+        last_date = None
+        batches   = [
             tickers[i:i + self.PRICE_BATCH_SIZE]
             for i in range(0, len(tickers), self.PRICE_BATCH_SIZE)
         ]
@@ -406,6 +407,9 @@ class StocksDataEngine:
                         if s_confirmed.empty:
                             continue
                         price = float(s_confirmed.iloc[-1])
+                        confirmed_date = s_confirmed.index[-1]
+                        if last_date is None or confirmed_date > last_date:
+                            last_date = confirmed_date
 
                         # ATH within the full 4Y window
                         ath          = float(s.max())
@@ -452,7 +456,7 @@ class StocksDataEngine:
             except Exception as e:
                 print(f"\n  [WARN] Batch {batch_idx} error: {e}")
 
-        return pd.DataFrame(all_rows)
+        return pd.DataFrame(all_rows), last_date
 
     # ── Sheets API format request builder ────────────────────
 
@@ -677,6 +681,7 @@ class StocksDataEngine:
         gainers:    pd.DataFrame,
         losers:     pd.DataFrame,
         label:      str,
+        as_of_date=None,
     ):
         """
         FIX (Losers layout): Losers now sit in Col F-I alongside gainers
@@ -730,6 +735,8 @@ class StocksDataEngine:
         # row_offset = 4 (0-based) = sheet row 5
         self._color_pct_cells(ws, sid, gainers_vals, row_offset=4, pct_cols=[3])
         self._color_pct_cells(ws, sid, losers_vals,  row_offset=4, pct_cols=[8])
+        if as_of_date is not None:
+            ws.update("AA1", [[as_of_date.strftime("%Y-%m-%d")]])
         print(f"  {label} G&L -> '{sheet_name}' done")
 
     def _write_ath_sheet(
@@ -737,6 +744,7 @@ class StocksDataEngine:
         sheet_name: str,
         df:         pd.DataFrame,
         label:      str,
+        as_of_date=None,
     ):
         """
         FIX (data starts from row 5):
@@ -788,6 +796,8 @@ class StocksDataEngine:
             ath_rows = df.reset_index(drop=True).values.tolist()
             self._color_pct_cells(ws, sid, ath_rows, row_offset=4,
                                   pct_cols=[4, 6, 7, 8, 9, 10, 11])
+        if as_of_date is not None:
+            ws.update("AA1", [[as_of_date.strftime("%Y-%m-%d")]])
         n = len(df) if not df.empty else 0
         print(f"  {label} ATH -> '{sheet_name}' ({n} stocks) done")
 
@@ -820,18 +830,18 @@ class StocksDataEngine:
             us_filtered = [t for t in us_tickers if us_mcaps.get(t, 0) >= self.US_MCAP_FLOOR]
             print(f"  Market cap filter: {len(us_filtered)}/{len(us_tickers)} tickers pass ${self.US_MCAP_FLOOR/1e9:.0f}B floor")
 
-            us_df = self._fetch_price_history(us_filtered, us_mcaps)
+            us_df, us_as_of = self._fetch_price_history(us_filtered, us_mcaps)
 
             if run_gl:
                 us_gainers, us_losers = self._derive_gl(us_df, name_cache, "US")
                 if not us_gainers.empty:
-                    self._write_gl_sheet("Top G&L US", us_gainers, us_losers, "US")
+                    self._write_gl_sheet("Top G&L US", us_gainers, us_losers, "US", us_as_of)
                 else:
                     print("  [WARN] US G&L: no stocks passed market cap filter.")
 
             if run_ath:
                 us_ath = self._derive_ath(us_df, name_cache, "US")
-                self._write_ath_sheet("ATH US", us_ath, "US")
+                self._write_ath_sheet("ATH US", us_ath, "US", us_as_of)
         else:
             print("  [SKIP] US universe unavailable.")
 
@@ -857,18 +867,18 @@ class StocksDataEngine:
             in_filtered = [t for t in in_tickers if in_mcaps.get(t, 0) >= self.IN_MCAP_FLOOR]
             print(f"  Market cap filter: {len(in_filtered)}/{len(in_tickers)} tickers pass Rs{self.IN_MCAP_FLOOR/1e7:.0f}Cr floor")
 
-            in_df = self._fetch_price_history(in_filtered, in_mcaps)
+            in_df, in_as_of = self._fetch_price_history(in_filtered, in_mcaps)
 
             if run_gl:
                 in_gainers, in_losers = self._derive_gl(in_df, name_cache, "IN")
                 if not in_gainers.empty:
-                    self._write_gl_sheet("Top G&L India", in_gainers, in_losers, "India")
+                    self._write_gl_sheet("Top G&L India", in_gainers, in_losers, "India", in_as_of)
                 else:
                     print("  [WARN] India G&L: no stocks passed market cap filter.")
 
             if run_ath:
                 in_ath = self._derive_ath(in_df, name_cache, "IN")
-                self._write_ath_sheet("ATH India", in_ath, "India")
+                self._write_ath_sheet("ATH India", in_ath, "India", in_as_of)
         else:
             print("  [SKIP] India universe unavailable.")
 

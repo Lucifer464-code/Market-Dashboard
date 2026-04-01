@@ -78,6 +78,18 @@ def _range_to_df(ws, range_str: str, header_idx: int | None = None) -> pd.DataFr
     return df
 
 
+# ── As-of date reader ─────────────────────────────────────
+
+@st.cache_data(ttl=28800)
+def load_section_date(sheet_name: str) -> str | None:
+    """Read the as-of date written to cell AA1 by data scripts."""
+    try:
+        val = _ws(sheet_name).acell("AA1").value
+        return val.strip() if val and val.strip() else None
+    except Exception:
+        return None
+
+
 # ── Section loaders ───────────────────────────────────────
 
 @st.cache_data(ttl=28800)
