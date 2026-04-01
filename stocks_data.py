@@ -127,6 +127,11 @@ class StocksDataEngine:
     IN_CACHE_FILE   = "nifty_total_market_tickers.pkl"
     CACHE_TTL_HOURS = 24
 
+    # ── Market cap cache (pickle, 24h TTL) ────────────────────
+    US_MCAP_CACHE_FILE = "us_mcap_cache.pkl"
+    IN_MCAP_CACHE_FILE = "in_mcap_cache.pkl"
+    MCAP_CACHE_TTL_HOURS = 24
+
     # ── Name cache (CSV, permanent) ───────────────────────────
     NAME_CACHE_FILE = "ticker_names.csv"
 
@@ -184,6 +189,29 @@ class StocksDataEngine:
     def _save_name_cache(self, name_map: dict):
         df = pd.DataFrame(sorted(name_map.items()), columns=["Ticker", "Name"])
         df.to_csv(self.NAME_CACHE_FILE, index=False)
+
+    # ── Market cap cache ──────────────────────────────────────
+
+    def _load_mcap_cache(self, path: str) -> dict | None:
+        if not os.path.exists(path):
+            return None
+        if (time.time() - os.path.getmtime(path)) / 3600 > self.MCAP_CACHE_TTL_HOURS:
+            return None
+        try:
+            with open(path, "rb") as f:
+                cached = pickle.load(f)
+            if isinstance(cached, dict) and cached:
+                return cached
+        except Exception:
+            pass
+        return None
+
+    def _save_mcap_cache(self, path: str, mcap_map: dict):
+        try:
+            with open(path, "wb") as f:
+                pickle.dump(mcap_map, f)
+        except Exception as e:
+            print(f"  [WARN] Could not save mcap cache: {e}")
 
     # ── Universe: Russell 3000 ────────────────────────────────
 
@@ -825,8 +853,13 @@ class StocksDataEngine:
             else:
                 print(f"  US names: all {len(us_tickers)} already up-to-date")
 
-            # Pre-fetch market caps and filter before downloading price history
-            us_mcaps    = self._fetch_market_caps(us_tickers)
+            # Pre-fetch market caps (cached 24h) and filter before downloading price history
+            us_mcaps = self._load_mcap_cache(self.US_MCAP_CACHE_FILE)
+            if us_mcaps is not None:
+                print(f"  Market caps: using cache ({len(us_mcaps)} tickers)")
+            else:
+                us_mcaps = self._fetch_market_caps(us_tickers)
+                self._save_mcap_cache(self.US_MCAP_CACHE_FILE, us_mcaps)
             us_filtered = [t for t in us_tickers if us_mcaps.get(t, 0) >= self.US_MCAP_FLOOR]
             print(f"  Market cap filter: {len(us_filtered)}/{len(us_tickers)} tickers pass ${self.US_MCAP_FLOOR/1e9:.0f}B floor")
 
@@ -862,8 +895,13 @@ class StocksDataEngine:
             else:
                 print(f"  India names: all {len(in_tickers)} already up-to-date")
 
-            # Pre-fetch market caps and filter before downloading price history
-            in_mcaps    = self._fetch_market_caps(in_tickers)
+            # Pre-fetch market caps (cached 24h) and filter before downloading price history
+            in_mcaps = self._load_mcap_cache(self.IN_MCAP_CACHE_FILE)
+            if in_mcaps is not None:
+                print(f"  Market caps: using cache ({len(in_mcaps)} tickers)")
+            else:
+                in_mcaps = self._fetch_market_caps(in_tickers)
+                self._save_mcap_cache(self.IN_MCAP_CACHE_FILE, in_mcaps)
             in_filtered = [t for t in in_tickers if in_mcaps.get(t, 0) >= self.IN_MCAP_FLOOR]
             print(f"  Market cap filter: {len(in_filtered)}/{len(in_tickers)} tickers pass Rs{self.IN_MCAP_FLOOR/1e7:.0f}Cr floor")
 
