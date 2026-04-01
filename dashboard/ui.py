@@ -229,8 +229,13 @@ def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bo
     components.html(html, height=frame_height + 10, scrolling=False)
 
 
-def section_header(title: str, subtitle: str = ""):
+def section_header(title: str, subtitle: str = "", date_str: str | None = None):
     sub_html = f"<div style='font-size:12px;color:#94a3b8;margin-top:2px'>{subtitle}</div>" if subtitle else ""
+    pill_html = (
+        f'<div style="background:#f0f9ff;border:1px solid #bae6fd;color:#0284c7;font-size:10px;'
+        f'font-weight:600;padding:3px 10px;border-radius:20px;letter-spacing:0.5px">'
+        f'{date_str}</div>'
+    ) if date_str else ""
     st.markdown(
         f"""
         <div class="ifpl-section-header" style="background:white;border-bottom:1px solid #e2e8f0;padding:14px 0;
@@ -239,10 +244,7 @@ def section_header(title: str, subtitle: str = ""):
             <div style="font-size:18px;font-weight:700;color:#0f172a">{title}</div>
             {sub_html}
           </div>
-          <div style="background:#f0f9ff;border:1px solid #bae6fd;color:#0284c7;font-size:10px;
-                      font-weight:600;padding:3px 10px;border-radius:20px;letter-spacing:0.5px">
-            DAILY DATA
-          </div>
+          {pill_html}
         </div>
         """,
         unsafe_allow_html=True,

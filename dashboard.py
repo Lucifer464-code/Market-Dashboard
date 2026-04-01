@@ -1,11 +1,28 @@
 import base64
+from datetime import datetime
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
 from dashboard.auth import login_wall
 from dashboard import data, ui
+
+
+def _pop_date(df: pd.DataFrame) -> tuple[pd.DataFrame, str | None]:
+    """Remove the Date column from df and return (df_without_date, formatted_date_str)."""
+    for col in df.columns:
+        if col.strip().lower() == "date":
+            vals = df[col].replace("", pd.NA).dropna()
+            date_str = None
+            if not vals.empty:
+                try:
+                    date_str = datetime.strptime(str(vals.iloc[0]), "%Y-%m-%d").strftime("%b %d, %Y")
+                except Exception:
+                    date_str = str(vals.iloc[0])
+            return df.drop(columns=[col]), date_str
+    return df, None
 
 # ── Page config ────────────────────────────────────────────
 st.set_page_config(
@@ -248,8 +265,10 @@ ui.mobile_nav(st.session_state.section)
 section = st.session_state.section
 
 if section == "Global Indices":
-    ui.section_header("Global Indices", "Major market indices worldwide")
     t1, t2 = data.load_global_indices()
+    t1, date_str = _pop_date(t1)
+    t2, _ = _pop_date(t2)
+    ui.section_header("Global Indices", "Major market indices worldwide", date_str)
     t1 = ui.sort_by_keyword(t1, "5d")
     t2 = ui.sort_by_keyword(t2, "5d") if not t2.empty else t2
     ui.render_stat_cards(t1)
@@ -259,8 +278,10 @@ if section == "Global Indices":
         ui.render_table(t2, height=600, bold_first_col=False)
 
 elif section == "NIFTY Indices":
-    ui.section_header("NIFTY Indices", "NSE India index returns")
     t1, t2 = data.load_nifty_indices()
+    t1, date_str = _pop_date(t1)
+    t2, _ = _pop_date(t2)
+    ui.section_header("NIFTY Indices", "NSE India index returns", date_str)
     t1 = t1.drop(t1.columns[1], axis=1)
     t2 = t2.drop(t2.columns[1], axis=1) if not t2.empty else t2
     t1 = ui.sort_by_keyword(t1, "5d")
@@ -271,47 +292,56 @@ elif section == "NIFTY Indices":
         ui.render_table(t2, bold_first_col=False)
 
 elif section == "NIFTY Sectors":
-    ui.section_header("NIFTY Sectors", "Sector-wise returns — India")
     df = data.load_nifty_sectors()
+    df, date_str = _pop_date(df)
+    ui.section_header("NIFTY Sectors", "Sector-wise returns — India", date_str)
     df = df.drop(df.columns[1], axis=1)
     df = ui.sort_by_keyword(df, "5d")
     ui.render_stat_cards(df)
     ui.render_table(df, bold_first_col=False)
 
 elif section == "ETFs US":
-    ui.section_header("ETFs US", "Top US ETFs by AUM")
     df = data.load_etfs_us()
+    df, date_str = _pop_date(df)
+    ui.section_header("ETFs US", "Top US ETFs by AUM", date_str)
     df = df.drop(df.columns[2], axis=1)
     ui.render_table(df, height=620)
 
 elif section == "Leveraged Funds":
-    ui.section_header("Leveraged Funds", "Biggest leveraged ETFs")
     df = data.load_leveraged_funds()
+    df, date_str = _pop_date(df)
+    ui.section_header("Leveraged Funds", "Biggest leveraged ETFs", date_str)
     df = df.drop(df.columns[3], axis=1)
     ui.render_table(df)
 
 elif section == "ETFs India":
-    ui.section_header("ETFs India", "Indian exchange-listed ETFs")
     df = data.load_etfs_india()
+    df, date_str = _pop_date(df)
+    ui.section_header("ETFs India", "Indian exchange-listed ETFs", date_str)
     df = df.drop(df.columns[1], axis=1)
     ui.render_table(df, bold_first_col=False)
 
 elif section == "Crypto":
-    ui.section_header("Crypto", "Top cryptocurrencies by market cap")
     df = data.load_crypto()
+    df, date_str = _pop_date(df)
+    ui.section_header("Crypto", "Top cryptocurrencies by market cap", date_str)
     ui.render_table(df)
 
 elif section == "Mutual Funds India":
-    ui.section_header("Mutual Funds India", "NAV and returns")
     df = data.load_mutual_funds()
+    df, date_str = _pop_date(df)
+    ui.section_header("Mutual Funds India", "NAV and returns", date_str)
     ui.render_table(df, height=620, bold_first_col=False)
 
 elif section == "Gainers & Losers US":
+    gainers, losers = data.load_gl_us()
+    gainers, date_str = _pop_date(gainers)
+    losers, _ = _pop_date(losers)
     ui.section_header(
         "Gainers & Losers — US",
         "Top 15 weekly gainers and losers · Russell 3000 ($2B+ market cap)",
+        date_str,
     )
-    gainers, losers = data.load_gl_us()
     col1, col2 = st.columns(2)
     with col1:
         ui.secondary_label("Gainers")
@@ -321,11 +351,14 @@ elif section == "Gainers & Losers US":
         ui.render_table(losers)
 
 elif section == "Gainers & Losers India":
+    gainers, losers = data.load_gl_india()
+    gainers, date_str = _pop_date(gainers)
+    losers, _ = _pop_date(losers)
     ui.section_header(
         "Gainers & Losers — India",
         "Top 15 weekly gainers and losers · NIFTY 500 (Rs1000Cr+ market cap)",
+        date_str,
     )
-    gainers, losers = data.load_gl_india()
     col1, col2 = st.columns(2)
     with col1:
         ui.secondary_label("Gainers")
@@ -335,17 +368,21 @@ elif section == "Gainers & Losers India":
         ui.render_table(losers)
 
 elif section == "ATH US":
+    df = data.load_ath_us()
+    df, date_str = _pop_date(df)
     ui.section_header(
         "All-Time High — US",
         "Stocks within 1% of all-time high · sorted by 1W%",
+        date_str,
     )
-    df = data.load_ath_us()
     ui.render_table(df, height=620)
 
 elif section == "ATH India":
+    df = data.load_ath_india()
+    df, date_str = _pop_date(df)
     ui.section_header(
         "All-Time High — India",
         "Stocks within 1% of all-time high · sorted by 1W%",
+        date_str,
     )
-    df = data.load_ath_india()
     ui.render_table(df, height=620)
