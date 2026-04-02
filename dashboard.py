@@ -1,5 +1,4 @@
 import base64
-from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import streamlit as st
@@ -183,9 +182,7 @@ NAV = {
 }
 
 with st.sidebar:
-    _IST = timezone(timedelta(hours=5, minutes=30))
-    _now = datetime.now(_IST)
-    _last_updated = f"{_now.strftime('%b')} {_now.day}, {_now.strftime('%Y')} {_now.strftime('%I:%M %p').lstrip('0')} IST"
+    _last_updated = data.load_last_updated() or "—"
     st.markdown(
         f"""
         <div style="display:flex;align-items:center;gap:10px;padding:20px 16px 12px;
