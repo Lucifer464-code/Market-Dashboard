@@ -182,8 +182,8 @@ if "section" not in st.session_state:
 NAV = {
     "MARKETS": [
         ("Global Indices",                  "Global Indices"),
-        ("NIFTY Sectors",                   "NIFTY Sectors"),
-        ("Additional NIFTY Sector Indices", "Additional NIFTY Sector Indices"),
+        ("NIFTY Sectoral Indices",                   "NIFTY Sectors"),
+        ("Additional NIFTY Sectoral Indices", "Additional NIFTY Sector Indices"),
         ("Broad Market Indices",            "Broad Market Indices"),
     ],
     "FUNDS": [
