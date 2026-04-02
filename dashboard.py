@@ -5,7 +5,6 @@ from pathlib import Path
 import streamlit as st
 import streamlit.components.v1 as components
 
-from dashboard.auth import login_wall
 from dashboard import data, ui
 
 
@@ -17,24 +16,9 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── One-time JS: sidebar cleanup + auth token localStorage sync ─
+# ── One-time JS: sidebar cleanup ───────────────────────────
 components.html("""<script>
-// Clear Streamlit sidebar state
 Object.keys(localStorage).filter(k => k.includes('sidebar') || k.includes('Sidebar')).forEach(k => localStorage.removeItem(k));
-// Auth: if token in URL, persist it; if missing from URL but in storage, inject it
-(function() {
-  var url = new URL(window.parent.location.href);
-  var urlTok = url.searchParams.get('auth_token');
-  if (urlTok) {
-    localStorage.setItem('ifpl_auth', urlTok);
-  } else {
-    var stored = localStorage.getItem('ifpl_auth');
-    if (stored) {
-      url.searchParams.set('auth_token', stored);
-      window.parent.location.replace(url.toString());
-    }
-  }
-})();
 </script>""", height=0)
 
 # ── Logo (base64) ───────────────────────────────────────────
@@ -170,9 +154,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ── Auth ────────────────────────────────────────────────────
-if not login_wall():
-    st.stop()
 
 # ── Session defaults ────────────────────────────────────────
 if "section" not in st.session_state:
