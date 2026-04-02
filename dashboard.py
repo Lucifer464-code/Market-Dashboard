@@ -1,5 +1,4 @@
 import base64
-from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
@@ -8,15 +7,6 @@ import streamlit.components.v1 as components
 from dashboard.auth import login_wall
 from dashboard import data, ui
 
-
-def _fmt_date(raw: str | None) -> str | None:
-    """Format a YYYY-MM-DD string from AA1 to 'Mon DD, YYYY' for display."""
-    if not raw:
-        return None
-    try:
-        return datetime.strptime(raw.strip(), "%Y-%m-%d").strftime("%b %d, %Y")
-    except Exception:
-        return raw
 
 # ── Page config ────────────────────────────────────────────
 st.set_page_config(
@@ -210,16 +200,26 @@ NAV = {
 }
 
 with st.sidebar:
+    _last_updated = data.load_last_updated()
+    _updated_html = (
+        f'<div style="text-align:right">'
+        f'<div style="color:#475569;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:0.8px">Last updated</div>'
+        f'<div style="color:#94a3b8;font-size:9px;margin-top:2px">{_last_updated}</div>'
+        f'</div>'
+    ) if _last_updated else ""
     st.markdown(
         f"""
-        <div style="display:flex;align-items:center;gap:10px;padding:20px 16px 16px;
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 16px 16px;
                     border-bottom:1px solid #1e293b;margin-bottom:8px">
-          {_logo_img}
-          <div>
-            <div style="color:#f1f5f9;font-size:13px;font-weight:700;letter-spacing:0.3px">IFPL</div>
-            <div style="color:#38bdf8;font-size:10px;font-weight:500;letter-spacing:1px;
-                        text-transform:uppercase;margin-top:1px">Market Dashboard</div>
+          <div style="display:flex;align-items:center;gap:10px">
+            {_logo_img}
+            <div>
+              <div style="color:#f1f5f9;font-size:13px;font-weight:700;letter-spacing:0.3px">IFPL</div>
+              <div style="color:#38bdf8;font-size:10px;font-weight:500;letter-spacing:1px;
+                          text-transform:uppercase;margin-top:1px">Market Dashboard</div>
+            </div>
           </div>
+          {_updated_html}
         </div>
         """,
         unsafe_allow_html=True,
@@ -260,8 +260,7 @@ section = st.session_state.section
 
 if section == "Global Indices":
     t1, t2 = data.load_global_indices()
-    ui.section_header("Global Indices", "Major market indices worldwide",
-                      _fmt_date(data.load_section_date("Global Indices")))
+    ui.section_header("Global Indices", "Major market indices worldwide")
     t1 = ui.sort_by_keyword(t1, "5d")
     t2 = ui.sort_by_keyword(t2, "5d") if not t2.empty else t2
     ui.render_stat_cards(t1)
@@ -272,8 +271,7 @@ if section == "Global Indices":
 
 elif section == "NIFTY Indices":
     t1, t2 = data.load_nifty_indices()
-    ui.section_header("NIFTY Indices", "NSE India index returns",
-                      _fmt_date(data.load_section_date("NIFTY Indices")))
+    ui.section_header("NIFTY Indices", "NSE India index returns")
     t1 = t1.drop(t1.columns[1], axis=1)
     t2 = t2.drop(t2.columns[1], axis=1) if not t2.empty else t2
     t1 = ui.sort_by_keyword(t1, "5d")
@@ -285,8 +283,7 @@ elif section == "NIFTY Indices":
 
 elif section == "NIFTY Sectors":
     df = data.load_nifty_sectors()
-    ui.section_header("NIFTY Sectors", "Sector-wise returns — India",
-                      _fmt_date(data.load_section_date("NIFTY Sectors")))
+    ui.section_header("NIFTY Sectors", "Sector-wise returns — India")
     df = df.drop(df.columns[1], axis=1)
     df = ui.sort_by_keyword(df, "5d")
     ui.render_stat_cards(df)
@@ -294,35 +291,30 @@ elif section == "NIFTY Sectors":
 
 elif section == "ETFs US":
     df = data.load_etfs_us()
-    ui.section_header("ETFs US", "Top US ETFs by AUM",
-                      _fmt_date(data.load_section_date("ETFs US")))
+    ui.section_header("ETFs US", "Top US ETFs by AUM")
     df = df.drop(df.columns[2], axis=1)
     ui.render_table(df, height=620)
 
 elif section == "Leveraged Funds":
     df = data.load_leveraged_funds()
-    ui.section_header("Leveraged Funds", "Biggest leveraged ETFs",
-                      _fmt_date(data.load_section_date("Biggest Leveraged Funds ")))
+    ui.section_header("Leveraged Funds", "Biggest leveraged ETFs")
     df = df.drop(df.columns[3], axis=1)
     ui.render_table(df)
 
 elif section == "ETFs India":
     df = data.load_etfs_india()
-    ui.section_header("ETFs India", "Indian exchange-listed ETFs",
-                      _fmt_date(data.load_section_date("ETFs India")))
+    ui.section_header("ETFs India", "Indian exchange-listed ETFs")
     df = df.drop(df.columns[1], axis=1)
     ui.render_table(df, bold_first_col=False)
 
 elif section == "Crypto":
     df = data.load_crypto()
-    ui.section_header("Crypto", "Top cryptocurrencies by market cap",
-                      _fmt_date(data.load_section_date("Crypto")))
+    ui.section_header("Crypto", "Top cryptocurrencies by market cap")
     ui.render_table(df)
 
 elif section == "Mutual Funds India":
     df = data.load_mutual_funds()
-    ui.section_header("Mutual Funds India", "NAV and returns",
-                      _fmt_date(data.load_section_date("Mutual Funds India")))
+    ui.section_header("Mutual Funds India", "NAV and returns")
     ui.render_table(df, height=620, bold_first_col=False)
 
 elif section == "Gainers & Losers US":
@@ -330,7 +322,6 @@ elif section == "Gainers & Losers US":
     ui.section_header(
         "Gainers & Losers — US",
         "Top 15 weekly gainers and losers · Russell 3000 ($2B+ market cap)",
-        _fmt_date(data.load_section_date("Top G&L US")),
     )
     col1, col2 = st.columns(2)
     with col1:
@@ -345,7 +336,6 @@ elif section == "Gainers & Losers India":
     ui.section_header(
         "Gainers & Losers — India",
         "Top 15 weekly gainers and losers · NIFTY 500 (Rs1000Cr+ market cap)",
-        _fmt_date(data.load_section_date("Top G&L India")),
     )
     col1, col2 = st.columns(2)
     with col1:
@@ -360,7 +350,6 @@ elif section == "ATH US":
     ui.section_header(
         "All-Time High — US",
         "Stocks within 1% of all-time high · sorted by 1W%",
-        _fmt_date(data.load_section_date("ATH US")),
     )
     ui.render_table(df, height=620)
 
@@ -369,6 +358,5 @@ elif section == "ATH India":
     ui.section_header(
         "All-Time High — India",
         "Stocks within 1% of all-time high · sorted by 1W%",
-        _fmt_date(data.load_section_date("ATH India")),
     )
     ui.render_table(df, height=620)

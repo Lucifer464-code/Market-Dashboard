@@ -47,6 +47,7 @@ import io
 import sys
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from google.oauth2.service_account import Credentials
 
 
@@ -681,7 +682,6 @@ class StocksDataEngine:
         gainers:    pd.DataFrame,
         losers:     pd.DataFrame,
         label:      str,
-        as_of_date=None,
     ):
         """
         FIX (Losers layout): Losers now sit in Col F-I alongside gainers
@@ -735,8 +735,6 @@ class StocksDataEngine:
         # row_offset = 4 (0-based) = sheet row 5
         self._color_pct_cells(ws, sid, gainers_vals, row_offset=4, pct_cols=[3])
         self._color_pct_cells(ws, sid, losers_vals,  row_offset=4, pct_cols=[8])
-        if as_of_date is not None:
-            ws.update("N1", [[as_of_date.strftime("%Y-%m-%d")]])
         print(f"  {label} G&L -> '{sheet_name}' done")
 
     def _write_ath_sheet(
@@ -744,7 +742,6 @@ class StocksDataEngine:
         sheet_name: str,
         df:         pd.DataFrame,
         label:      str,
-        as_of_date=None,
     ):
         """
         FIX (data starts from row 5):
@@ -796,8 +793,6 @@ class StocksDataEngine:
             ath_rows = df.reset_index(drop=True).values.tolist()
             self._color_pct_cells(ws, sid, ath_rows, row_offset=4,
                                   pct_cols=[4, 6, 7, 8, 9, 10, 11])
-        if as_of_date is not None:
-            ws.update("N1", [[as_of_date.strftime("%Y-%m-%d")]])
         n = len(df) if not df.empty else 0
         print(f"  {label} ATH -> '{sheet_name}' ({n} stocks) done")
 
@@ -835,13 +830,13 @@ class StocksDataEngine:
             if run_gl:
                 us_gainers, us_losers = self._derive_gl(us_df, name_cache, "US")
                 if not us_gainers.empty:
-                    self._write_gl_sheet("Top G&L US", us_gainers, us_losers, "US", us_as_of)
+                    self._write_gl_sheet("Top G&L US", us_gainers, us_losers, "US")
                 else:
                     print("  [WARN] US G&L: no stocks passed market cap filter.")
 
             if run_ath:
                 us_ath = self._derive_ath(us_df, name_cache, "US")
-                self._write_ath_sheet("ATH US", us_ath, "US", us_as_of)
+                self._write_ath_sheet("ATH US", us_ath, "US")
         else:
             print("  [SKIP] US universe unavailable.")
 
@@ -872,15 +867,24 @@ class StocksDataEngine:
             if run_gl:
                 in_gainers, in_losers = self._derive_gl(in_df, name_cache, "IN")
                 if not in_gainers.empty:
-                    self._write_gl_sheet("Top G&L India", in_gainers, in_losers, "India", in_as_of)
+                    self._write_gl_sheet("Top G&L India", in_gainers, in_losers, "India")
                 else:
                     print("  [WARN] India G&L: no stocks passed market cap filter.")
 
             if run_ath:
                 in_ath = self._derive_ath(in_df, name_cache, "IN")
-                self._write_ath_sheet("ATH India", in_ath, "India", in_as_of)
+                self._write_ath_sheet("ATH India", in_ath, "India")
         else:
             print("  [SKIP] India universe unavailable.")
+
+        # Write run timestamp to A1 of "Top G&L US" — read by dashboard for "Last updated on"
+        dt = datetime.now()
+        run_ts = dt.strftime("%b ") + str(dt.day) + dt.strftime(", %Y %I:%M %p")
+        try:
+            ws_meta = self.sheet_client.get_worksheet("Top G&L US")
+            ws_meta.update("A1", [[run_ts]])
+        except Exception as e:
+            print(f"  [WARN] Could not write run timestamp: {e}")
 
         print("\n===== STOCKS DATA UPDATE COMPLETE =====")
 
