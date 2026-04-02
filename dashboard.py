@@ -186,7 +186,7 @@ NAV = {
         ("Additional NIFTY Sector Indices", "Additional NIFTY Sector Indices"),
         ("Broad Market Indices",            "Broad Market Indices"),
     ],
-    "ASSETS": [
+    "FUNDS": [
         ("ETFs US",            "ETFs US"),
         ("Leveraged Funds",    "Leveraged Funds"),
         ("ETFs India",         "ETFs India"),
