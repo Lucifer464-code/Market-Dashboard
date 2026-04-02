@@ -203,27 +203,25 @@ NAV = {
 with st.sidebar:
     _now = datetime.now()
     _last_updated = f"{_now.strftime('%b')} {_now.day}, {_now.strftime('%Y')} {_now.strftime('%I:%M %p').lstrip('0')}"
-    _updated_html = (
-        f'<div style="text-align:right">'
-        f'<div style="color:#475569;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:0.8px">Last updated</div>'
-        f'<div style="color:#94a3b8;font-size:9px;margin-top:2px">{_last_updated}</div>'
-        f'</div>'
-    )
     st.markdown(
         f"""
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 16px 16px;
-                    border-bottom:1px solid #1e293b;margin-bottom:8px">
-          <div style="display:flex;align-items:center;gap:10px">
-            {_logo_img}
-            <div>
-              <div style="color:#f1f5f9;font-size:13px;font-weight:700;letter-spacing:0.3px">IFPL</div>
-              <div style="color:#38bdf8;font-size:10px;font-weight:500;letter-spacing:1px;
-                          text-transform:uppercase;margin-top:1px">Market Dashboard</div>
-            </div>
+        <div style="display:flex;align-items:center;gap:10px;padding:20px 16px 12px;
+                    border-bottom:1px solid #1e293b;margin-bottom:4px">
+          {_logo_img}
+          <div>
+            <div style="color:#f1f5f9;font-size:13px;font-weight:700;letter-spacing:0.3px">IFPL</div>
+            <div style="color:#38bdf8;font-size:10px;font-weight:500;letter-spacing:1px;
+                        text-transform:uppercase;margin-top:1px">Market Dashboard</div>
           </div>
-          {_updated_html}
         </div>
         """,
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div style='padding:6px 16px 12px;border-bottom:1px solid #1e293b;margin-bottom:8px'>"
+        f"<div style='color:#475569;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:0.8px'>Last updated</div>"
+        f"<div style='color:#94a3b8;font-size:10px;margin-top:2px'>{_last_updated}</div>"
+        f"</div>",
         unsafe_allow_html=True,
     )
 
