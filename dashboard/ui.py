@@ -234,20 +234,21 @@ def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bo
 def section_header(title: str, subtitle: str = ""):
     yesterday = datetime.now() - timedelta(days=1)
     price_date = f"Price as on {yesterday.strftime('%b')} {yesterday.day}, {yesterday.year}"
-    sub_html = f"<div style='font-size:12px;color:#94a3b8;margin-top:2px'>{subtitle}</div>" if subtitle else ""
-    st.markdown(
-        f"""
-        <div class="ifpl-section-header" style="background:white;border-bottom:1px solid #e2e8f0;padding:14px 0;
-                    display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-          <div>
-            <div style="font-size:18px;font-weight:700;color:#0f172a">{title}</div>
-            {sub_html}
-          </div>
-          <div style="font-size:11px;color:#94a3b8;font-weight:500">{price_date}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    col_left, col_right = st.columns([4, 1])
+    with col_left:
+        st.markdown(
+            f"<div style='padding:6px 0 4px'>"
+            f"<div style='font-size:18px;font-weight:700;color:#0f172a'>{title}</div>"
+            + (f"<div style='font-size:12px;color:#94a3b8;margin-top:2px'>{subtitle}</div>" if subtitle else "")
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+    with col_right:
+        st.markdown(
+            f"<div style='text-align:right;padding:10px 0 4px;font-size:12px;color:#64748b;font-weight:500'>{price_date}</div>",
+            unsafe_allow_html=True,
+        )
+    st.markdown("<hr style='margin:0 0 16px;border:none;border-top:1px solid #e2e8f0'>", unsafe_allow_html=True)
 
 
 def sort_by_keyword(df: pd.DataFrame, keyword: str) -> pd.DataFrame:

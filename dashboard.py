@@ -200,13 +200,13 @@ NAV = {
 }
 
 with st.sidebar:
-    _last_updated = data.load_last_updated()
+    _last_updated = data.load_last_updated() or "—"
     _updated_html = (
         f'<div style="text-align:right">'
         f'<div style="color:#475569;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:0.8px">Last updated</div>'
         f'<div style="color:#94a3b8;font-size:9px;margin-top:2px">{_last_updated}</div>'
         f'</div>'
-    ) if _last_updated else ""
+    )
     st.markdown(
         f"""
         <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 16px 16px;
