@@ -736,6 +736,8 @@ class StocksDataEngine:
         self._color_pct_cells(ws, sid, gainers_vals, row_offset=4, pct_cols=[3])
         self._color_pct_cells(ws, sid, losers_vals,  row_offset=4, pct_cols=[8])
         if as_of_date is not None:
+            if ws.col_count < 27:
+                ws.resize(cols=27)
             ws.update("AA1", [[as_of_date.strftime("%Y-%m-%d")]])
         print(f"  {label} G&L -> '{sheet_name}' done")
 
@@ -797,6 +799,8 @@ class StocksDataEngine:
             self._color_pct_cells(ws, sid, ath_rows, row_offset=4,
                                   pct_cols=[4, 6, 7, 8, 9, 10, 11])
         if as_of_date is not None:
+            if ws.col_count < 27:
+                ws.resize(cols=27)
             ws.update("AA1", [[as_of_date.strftime("%Y-%m-%d")]])
         n = len(df) if not df.empty else 0
         print(f"  {label} ATH -> '{sheet_name}' ({n} stocks) done")
