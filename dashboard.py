@@ -1,4 +1,5 @@
 import base64
+from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
@@ -200,7 +201,8 @@ NAV = {
 }
 
 with st.sidebar:
-    _last_updated = data.load_last_updated() or "—"
+    _now = datetime.now()
+    _last_updated = f"{_now.strftime('%b')} {_now.day}, {_now.strftime('%Y')} {_now.strftime('%I:%M %p').lstrip('0')}"
     _updated_html = (
         f'<div style="text-align:right">'
         f'<div style="color:#475569;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:0.8px">Last updated</div>'

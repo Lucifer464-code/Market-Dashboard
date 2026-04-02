@@ -78,18 +78,6 @@ def _range_to_df(ws, range_str: str, header_idx: int | None = None) -> pd.DataFr
     return df
 
 
-# ── Last updated reader ───────────────────────────────────
-
-@st.cache_data(ttl=28800)
-def load_last_updated() -> str | None:
-    """Read the run timestamp written to A1 of 'Top G&L US' by stocks_data."""
-    try:
-        val = _ws("Top G&L US").acell("A1").value
-        return val.strip() if val and val.strip() else None
-    except Exception:
-        return None
-
-
 # ── Section loaders ───────────────────────────────────────
 
 @st.cache_data(ttl=28800)

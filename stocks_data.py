@@ -47,7 +47,6 @@ import io
 import sys
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
 from google.oauth2.service_account import Credentials
 
 
@@ -876,15 +875,6 @@ class StocksDataEngine:
                 self._write_ath_sheet("ATH India", in_ath, "India")
         else:
             print("  [SKIP] India universe unavailable.")
-
-        # Write run timestamp to A1 of "Top G&L US" — read by dashboard for "Last updated on"
-        dt = datetime.now()
-        run_ts = dt.strftime("%b ") + str(dt.day) + dt.strftime(", %Y %I:%M %p")
-        try:
-            ws_meta = self.sheet_client.get_worksheet("Top G&L US")
-            ws_meta.update("A1", [[run_ts]])
-        except Exception as e:
-            print(f"  [WARN] Could not write run timestamp: {e}")
 
         print("\n===== STOCKS DATA UPDATE COMPLETE =====")
 
