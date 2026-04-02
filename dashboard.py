@@ -181,9 +181,10 @@ if "section" not in st.session_state:
 # ── Sidebar navigation ─────────────────────────────────────
 NAV = {
     "MARKETS": [
-        ("Global Indices",     "Global Indices"),
-        ("NIFTY Sectors",      "NIFTY Sectors"),
-        ("NIFTY Indices",      "NIFTY Indices"),
+        ("Global Indices",                  "Global Indices"),
+        ("NIFTY Sectors",                   "NIFTY Sectors"),
+        ("Additional NIFTY Sector Indices", "Additional NIFTY Sector Indices"),
+        ("Broad Market Indices",            "Broad Market Indices"),
     ],
     "ASSETS": [
         ("ETFs US",            "ETFs US"),
@@ -270,16 +271,21 @@ if section == "Global Indices":
         ui.secondary_label("More Indices")
         ui.render_table(t2, height=600, bold_first_col=False)
 
-elif section == "NIFTY Indices":
-    t1, t2 = data.load_nifty_indices()
-    ui.section_header("NIFTY Indices", "NSE India index returns")
+elif section == "Additional NIFTY Sector Indices":
+    t1, _ = data.load_nifty_indices()
+    ui.section_header("Additional NIFTY Sector Indices", "NSE India sector index returns")
     t1 = t1.drop(t1.columns[1], axis=1)
-    t2 = t2.drop(t2.columns[1], axis=1) if not t2.empty else t2
     t1 = ui.sort_by_keyword(t1, "5d")
-    t2 = ui.sort_by_keyword(t2, "5d") if not t2.empty else t2
     ui.render_stat_cards(t1)
     ui.render_table(t1, bold_first_col=False)
+
+elif section == "Broad Market Indices":
+    _, t2 = data.load_nifty_indices()
+    ui.section_header("Broad Market Indices", "NSE India broad market index returns")
     if not t2.empty:
+        t2 = t2.drop(t2.columns[1], axis=1)
+        t2 = ui.sort_by_keyword(t2, "5d")
+        ui.render_stat_cards(t2)
         ui.render_table(t2, bold_first_col=False)
 
 elif section == "NIFTY Sectors":
