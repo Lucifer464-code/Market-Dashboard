@@ -95,47 +95,47 @@ def load_last_updated() -> str:
 @st.cache_data(ttl=28800)
 def load_global_indices():
     ws = _ws("Global Indices")
-    t1 = _range_to_df(ws, "B4:J17")
-    t2 = _range_to_df(ws, "B22:J80")
+    t1 = _range_to_df(ws, "B4:K17")
+    t2 = _range_to_df(ws, "B22:K80")
     return t1, t2
 
 
 @st.cache_data(ttl=28800)
 def load_nifty_indices():
     ws = _ws("NIFTY Indices")
-    t1 = _range_to_df(ws, "B3:J17")
-    t2 = _range_to_df(ws, "B20:J27")
+    t1 = _range_to_df(ws, "B3:K17")
+    t2 = _range_to_df(ws, "B20:K27")
     return t1, t2
 
 
 @st.cache_data(ttl=28800)
 def load_nifty_sectors():
     ws = _ws("NIFTY Sectors")
-    return _range_to_df(ws, "B3:J17")
+    return _range_to_df(ws, "B3:K17")
 
 
 @st.cache_data(ttl=28800)
 def load_etfs_us():
     ws = _ws("ETFs US")
-    return _range_to_df(ws, "B2:L103")
+    return _range_to_df(ws, "B2:M103")
 
 
 @st.cache_data(ttl=28800)
 def load_leveraged_funds():
     ws = _ws("Biggest Leveraged Funds ")   # trailing space is intentional
-    return _range_to_df(ws, "A6:L122", header_idx=0)
+    return _range_to_df(ws, "A6:M122", header_idx=0)
 
 
 @st.cache_data(ttl=28800)
 def load_etfs_india():
     ws = _ws("ETFs India")
-    return _range_to_df(ws, "B6:K100", header_idx=0)
+    return _range_to_df(ws, "B6:L100", header_idx=0)
 
 
 @st.cache_data(ttl=28800)
 def load_crypto():
     ws = _ws("Crypto")
-    return _range_to_df(ws, "A103:J118", header_idx=0)
+    return _range_to_df(ws, "A103:K118", header_idx=0)
 
 
 @st.cache_data(ttl=28800)

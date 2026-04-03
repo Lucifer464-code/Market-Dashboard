@@ -88,7 +88,7 @@ class ReturnCalculator:
     def calculate(close_series, current_price, open_series=None):
 
         if close_series is None or close_series.empty or current_price is None:
-            return ["NA"] * 7
+            return ["NA"] * 8
 
         close_series = close_series.dropna().sort_index()
 
@@ -140,6 +140,7 @@ class ReturnCalculator:
 
         return [
             current_price,
+            ret_by_trading_days(1),
             ret_by_trading_days(5),
             ret(today - pd.DateOffset(months=1)),
             ret(today - pd.DateOffset(months=3)),
@@ -250,7 +251,7 @@ class YahooDataEngine:
         )
 
         start_col_index = ord(output_start_col) - ord("A")
-        end_col_letter  = chr(start_col_index + 6 + ord("A"))
+        end_col_letter  = chr(start_col_index + 7 + ord("A"))
 
         updates = []
 
@@ -263,7 +264,7 @@ class YahooDataEngine:
                 returns       = ReturnCalculator.calculate(close_series, current_price)
             except Exception as e:
                 print(f"  [WARN] {symbol} price fetch failed: {e}")
-                returns = ["NA"] * 7
+                returns = ["NA"] * 8
 
             returns = ReturnCalculator.clean(returns)
 
@@ -325,11 +326,11 @@ class ZerodhaDataEngine:
         """
         token = self.index_token_map.get(ticker)
         if not token:
-            return ["NA"] * 7
+            return ["NA"] * 8
         try:
             candles = self.kite.historical_data(token, start_date, end_date, "day")
             if not candles:
-                return ["NA"] * 7
+                return ["NA"] * 8
             df = pd.DataFrame(candles)
             df["date"] = pd.to_datetime(df["date"])
             df.set_index("date", inplace=True)
@@ -338,7 +339,7 @@ class ZerodhaDataEngine:
             open_series   = df["open"] if open_col else None
             return ReturnCalculator.calculate(close_series, current_price, open_series)
         except Exception:
-            return ["NA"] * 7
+            return ["NA"] * 8
 
     def update_nifty_indices(self):
 
@@ -374,7 +375,7 @@ class ZerodhaDataEngine:
                 sheet_row = future_to_row[future]
                 returns   = ReturnCalculator.clean(future.result())
                 updates.append({
-                    "range":  f"D{sheet_row}:J{sheet_row}",
+                    "range":  f"D{sheet_row}:K{sheet_row}",
                     "values": [returns],
                 })
 
@@ -413,7 +414,7 @@ class ZerodhaDataEngine:
                 sheet_row = future_to_row[future]
                 returns   = ReturnCalculator.clean(future.result())
                 updates.append({
-                    "range":  f"D{sheet_row}:J{sheet_row}",
+                    "range":  f"D{sheet_row}:K{sheet_row}",
                     "values": [returns],
                 })
 
@@ -605,7 +606,7 @@ class GlobalIndicesEngine:
                 returns       = ReturnCalculator.calculate(close_series, current_price)
             except Exception as e:
                 print(f"  [WARN] {ticker}: {e}")
-                returns = ["NA"] * 7
+                returns = ["NA"] * 8
             returns = ReturnCalculator.clean(returns) + ["NA"]   # pad 5Y column
             updates.append({"range": range_fn(sheet_row), "values": [returns]})
         return updates
@@ -627,8 +628,8 @@ class GlobalIndicesEngine:
 
         price_data, live_prices = self._fetch_data(all_symbols)
 
-        t1_updates = self._build_updates(t1_rows, price_data, live_prices, all_symbols, lambda r: f"D{r}:K{r}")
-        t2_updates = self._build_updates(t2_rows, price_data, live_prices, all_symbols, lambda r: f"D{r}:K{r}")
+        t1_updates = self._build_updates(t1_rows, price_data, live_prices, all_symbols, lambda r: f"D{r}:L{r}")
+        t2_updates = self._build_updates(t2_rows, price_data, live_prices, all_symbols, lambda r: f"D{r}:L{r}")
 
         self.sheet_client.batch_update(worksheet, t1_updates + t2_updates)
         print(f"  Table 1 updated — {len(t1_updates)} indices OK")
@@ -817,7 +818,7 @@ class ETFdbEngine:
         )
 
         start_col_idx  = ord(rc) - ord("A")
-        end_col_letter = chr(start_col_idx + 6 + ord("A"))
+        end_col_letter = chr(start_col_idx + 7 + ord("A"))
 
         # Normalise DataFrame to {ticker: close_series} so the loop is uniform.
         price_updates = []
@@ -831,7 +832,7 @@ class ETFdbEngine:
                 returns       = ReturnCalculator.calculate(close_series, current_price)
             except Exception as e:
                 print(f"  [WARN] {etf['ticker']} price fetch failed: {e}")
-                returns = ["NA"] * 7
+                returns = ["NA"] * 8
             price_updates.append({
                 "range":  f"{rc}{row}:{end_col_letter}{row}",
                 "values": [ReturnCalculator.clean(returns)],
@@ -1005,8 +1006,8 @@ class MutualFundsEngine:
             else:
                 current_nav = float(nav_series.iloc[-1])
                 all_returns = ReturnCalculator.calculate(nav_series, current_nav)
-                # all_returns = [price, 1W, 1M, 3M, 6M, 1Y, 3Y] — drop price and 1W
-                returns = all_returns[2:]
+                # all_returns = [price, 1D, 1W, 1M, 3M, 6M, 1Y, 3Y] — drop price, 1D, 1W
+                returns = all_returns[3:]
 
             returns = ReturnCalculator.clean(returns)
 
