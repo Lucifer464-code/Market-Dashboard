@@ -429,6 +429,10 @@ class StocksDataEngine:
                             past = float(eligible.iloc[-1])
                             return (price / past - 1) * 100 if past != 0 else np.nan
 
+                        change_1d = (
+                            (price / float(s_confirmed.iloc[-2]) - 1) * 100
+                            if len(s_confirmed) >= 2 else np.nan
+                        )
                         change_1w = (
                             (price / float(s.iloc[-6]) - 1) * 100
                             if len(s) >= 6 else np.nan
@@ -440,6 +444,7 @@ class StocksDataEngine:
                             "Price":      price,
                             "ATH":        ath,
                             "PctFromATH": pct_from_ath,
+                            "Change1D":   change_1d,
                             "Change1W":   change_1w,
                             "Change1M":   ret(off_1m),
                             "Change3M":   ret(off_3m),
@@ -658,7 +663,7 @@ class StocksDataEngine:
         df["ATH"]        = df["ATH"].apply(lambda v: round(float(v), 2))
         df["Price"]      = df["Price"].apply(lambda v: round(float(v), 2))
         df["PctFromATH"] = df["PctFromATH"].apply(self._fmt_pct)
-        for col in ["Change1W", "Change1M", "Change3M", "Change6M", "Change1Y", "Change3Y"]:
+        for col in ["Change1D", "Change1W", "Change1M", "Change3M", "Change6M", "Change1Y", "Change3Y"]:
             df[col] = df[col].apply(self._fmt_pct)
 
         df = df.sort_values(
@@ -669,7 +674,7 @@ class StocksDataEngine:
 
         cols = [
             "Ticker", "Name", "MarketCap", "ATH", "PctFromATH",
-            "Price", "Change1W", "Change1M", "Change3M", "Change6M", "Change1Y", "Change3Y",
+            "Price", "Change1D", "Change1W", "Change1M", "Change3M", "Change6M", "Change1Y", "Change3Y",
         ]
         return df[cols]
 
@@ -750,24 +755,24 @@ class StocksDataEngine:
         """
         ws      = self.sheet_client.get_worksheet(sheet_name)
         updates = []
-        ncols   = 12   # A–L
+        ncols   = 13   # A–M
         empty   = [""] * ncols
 
         col_hdr = [[
             "Ticker", "Name", "Market Cap", "ATH", "ATH %",
-            "Price", "1W%", "1M%", "3M%", "6M%", "1Y%", "3Y%",
+            "Price", "1D%", "1W%", "1M%", "3M%", "6M%", "1Y%", "3Y%",
         ]]
 
         if df.empty:
-            updates.append({"range": "A3:L3", "values": [["No stocks currently at all-time high"] + [""] * (ncols - 1)]})
-            updates.append({"range": "A4:L4", "values": col_hdr})
-            updates.append({"range": f"A5:L{4 + 50}", "values": [empty] * 50})
+            updates.append({"range": "A3:M3", "values": [["No stocks currently at all-time high"] + [""] * (ncols - 1)]})
+            updates.append({"range": "A4:M4", "values": col_hdr})
+            updates.append({"range": f"A5:M{4 + 50}", "values": [empty] * 50})
         else:
-            updates.append({"range": "A3:L3", "values": [[f"Stocks within 1% of All-Time High — sorted by 1W%"] + [""] * (ncols - 1)]})
-            updates.append({"range": "A4:L4", "values": col_hdr})
+            updates.append({"range": "A3:M3", "values": [[f"Stocks within 1% of All-Time High — sorted by 1W%"] + [""] * (ncols - 1)]})
+            updates.append({"range": "A4:M4", "values": col_hdr})
             # Data rows start at row 5 + 50 trailing clear rows
             all_rows = df.reset_index(drop=True).values.tolist() + [empty] * 50
-            updates.append({"range": f"A5:L{4 + len(all_rows)}", "values": all_rows})
+            updates.append({"range": f"A5:M{4 + len(all_rows)}", "values": all_rows})
 
         self.sheet_client.batch_update(ws, updates)
 
@@ -777,21 +782,21 @@ class StocksDataEngine:
         data_end = 200   # generous upper bound for ATH rows
         fmt_reqs = [
             # Column header row 4 (0-based index 3): all cols center + bold
-            f(sid, 3, 4, 0, 12, center=True, bold=True),
+            f(sid, 3, 4, 0, 13, center=True, bold=True),
             # Data rows 5-200 (0-based 4 onwards): col A (ticker) center + bold
             f(sid, 4, data_end, 0, 1, center=True, bold=True),
-            # Data rows 5-200: cols C-L (all numeric cols) center
-            f(sid, 4, data_end, 2, 12, center=True),
+            # Data rows 5-200: cols C-M (all numeric cols) center
+            f(sid, 4, data_end, 2, 13, center=True),
         ]
         self.sheet_client.apply_formats(ws, fmt_reqs)
 
         # ── Per-cell text colour for % columns ────────────────
-        # ATH%=col4, 1W%=col6, 1M%=col7, 3M%=col8, 6M%=col9, 1Y%=col10, 3Y%=col11
+        # ATH%=col4, 1D%=col6, 1W%=col7, 1M%=col8, 3M%=col9, 6M%=col10, 1Y%=col11, 3Y%=col12
         # row_offset = 4 (0-based) = sheet row 5
         if not df.empty:
             ath_rows = df.reset_index(drop=True).values.tolist()
             self._color_pct_cells(ws, sid, ath_rows, row_offset=4,
-                                  pct_cols=[4, 6, 7, 8, 9, 10, 11])
+                                  pct_cols=[4, 6, 7, 8, 9, 10, 11, 12])
         n = len(df) if not df.empty else 0
         print(f"  {label} ATH -> '{sheet_name}' ({n} stocks) done")
 

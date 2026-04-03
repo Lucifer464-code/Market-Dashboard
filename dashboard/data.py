@@ -163,7 +163,7 @@ def load_gl_india():
 @st.cache_data(ttl=28800)
 def load_ath_us():
     ws = _ws("ATH US")
-    return _range_to_df(ws, "A4:L200")
+    return _range_to_df(ws, "A4:M200")
 
 
 @st.cache_data(ttl=28800)
