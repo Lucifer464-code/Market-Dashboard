@@ -169,4 +169,4 @@ def load_ath_us():
 @st.cache_data(ttl=28800)
 def load_ath_india():
     ws = _ws("ATH India")
-    return _range_to_df(ws, "A4:L200", header_idx=0)
+    return _range_to_df(ws, "A4:M200", header_idx=0)
