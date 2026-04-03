@@ -682,7 +682,7 @@ class ETFdbEngine:
             # Commodity-focused leveraged ETFs — use Leveraged ETFs type;
             # adjust etfdb_type to "Commodity ETFs" if you want non-leveraged.
             "etfdb_type":  "Leveraged ETFs",
-            "n":           6,
+            "n":           7,
             "start_row":   2,
             "ticker_col":  "A",
             "name_col":    "B",
@@ -691,7 +691,7 @@ class ETFdbEngine:
         },
         "ETFs US": {
             "etfdb_type":  None,   # no type filter = all ETFs sorted by AUM
-            "n":           100,
+            "n":           200,
             "start_row":   3,
             "ticker_col":  "B",
             "name_col":    "C",
@@ -1038,7 +1038,7 @@ class MarketUpdater:
     @property
     def _sheet_map(self):
         return {
-            "ETFs India":                   lambda: self.yahoo.update_sheet("ETFs India", "C15:C30", 15, "E"),
+            "ETFs India":                   lambda: self.yahoo.update_sheet("ETFs India", "C7:C100", 7, "E"),
             "Crypto":                        lambda: self.yahoo.update_sheet("Crypto", "B104:B118", 104, "D"),
             "Global Indices":               self.global_indices.update_global_indices,
             "Mutual Funds":                 self.mutual_funds.update_mutual_funds,
@@ -1080,7 +1080,7 @@ class MarketUpdater:
             multiple yf.download() calls run concurrently.
             """
             for name, fn in [
-                ("ETFs India",     lambda: self.yahoo.update_sheet("ETFs India", "C15:C30", 15, "E")),
+                ("ETFs India",     lambda: self.yahoo.update_sheet("ETFs India", "C7:C100", 7, "E")),
                 ("Crypto",         lambda: self.yahoo.update_sheet("Crypto", "B104:B118", 104, "D")),
                 ("Global Indices", self.global_indices.update_global_indices),
                 ("ETFdb Sheets",   self.etfdb.update_all),

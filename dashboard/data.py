@@ -117,7 +117,7 @@ def load_nifty_sectors():
 @st.cache_data(ttl=28800)
 def load_etfs_us():
     ws = _ws("ETFs US")
-    return _range_to_df(ws, "B2:M103")
+    return _range_to_df(ws, "B2:M210")
 
 
 @st.cache_data(ttl=28800)
