@@ -93,7 +93,7 @@ def load_last_updated() -> str:
 # ── Stocks metadata (price as of + updated at) ────────────
 
 @st.cache_data(ttl=28800)
-def load_stocks_metadata(sheet_name: str) -> tuple[str, str]:
+def load_stocks_metadata(sheet_name: str) -> tuple:
     """
     Reads A1 (price_as_of) and A2 (updated_at) written by stocks_data.py.
     Returns (price_as_of, updated_at) strings.

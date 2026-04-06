@@ -31,7 +31,7 @@ def _is_market_open(market: str) -> bool:
     return now.weekday() < 5 and open_t <= now <= close_t
 
 
-def _make_metadata(market: str) -> tuple:
+def _make_metadata(market: str):
     """
     Build (price_as_of, updated_at) strings for sheet A1/A2 metadata cells.
     market: "US", "IN", "CRYPTO", or "NAV"
