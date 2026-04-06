@@ -7,12 +7,65 @@ import pickle
 import requests
 import difflib
 import time
+from zoneinfo import ZoneInfo
 
 from kiteconnect import KiteConnect
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from google.oauth2.service_account import Credentials
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+def _is_market_open(market: str) -> bool:
+    """Return True if the given market is currently in its regular session."""
+    if market == "US":
+        tz      = ZoneInfo("America/New_York")
+        now     = datetime.now(tz)
+        open_t  = now.replace(hour=9,  minute=30, second=0, microsecond=0)
+        close_t = now.replace(hour=16, minute=0,  second=0, microsecond=0)
+    else:  # IN
+        tz      = ZoneInfo("Asia/Kolkata")
+        now     = datetime.now(tz)
+        open_t  = now.replace(hour=9,  minute=15, second=0, microsecond=0)
+        close_t = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    return now.weekday() < 5 and open_t <= now <= close_t
+
+
+def _make_metadata(market: str) -> tuple:
+    """
+    Build (price_as_of, updated_at) strings for sheet A1/A2 metadata cells.
+    market: "US", "IN", "CRYPTO", or "NAV"
+    """
+    ist     = ZoneInfo("Asia/Kolkata")
+    now_ist = datetime.now(ist)
+    updated_at = (
+        f"Updated {now_ist.strftime('%b')} {now_ist.day}, {now_ist.year}"
+        f"  ·  {int(now_ist.strftime('%I'))}:{now_ist.strftime('%M %p')} IST"
+    )
+
+    if market == "NAV":
+        price_as_of = f"NAV as on {now_ist.strftime('%b')} {now_ist.day}, {now_ist.year}  (End of Day)"
+    elif market == "CRYPTO":
+        price_as_of = (
+            f"Price as on {now_ist.strftime('%b')} {now_ist.day}, {now_ist.year}"
+            f"  ·  {int(now_ist.strftime('%I'))}:{now_ist.strftime('%M %p')} IST"
+            f"  (Live)"
+        )
+    elif _is_market_open(market):
+        tz_name  = "America/New_York" if market == "US" else "Asia/Kolkata"
+        tz_label = "ET" if market == "US" else "IST"
+        now      = datetime.now(ZoneInfo(tz_name))
+        price_as_of = (
+            f"Price as on {now.strftime('%b')} {now.day}, {now.year}"
+            f"  ·  {int(now.strftime('%I'))}:{now.strftime('%M %p')} {tz_label}"
+            f"  (Live)"
+        )
+    else:
+        tz_name = "America/New_York" if market == "US" else "Asia/Kolkata"
+        now     = datetime.now(ZoneInfo(tz_name))
+        price_as_of = f"Price as on {now.strftime('%b')} {now.day}, {now.year}  (Close)"
+
+    return price_as_of, updated_at
 
 
 # ======================================================
@@ -61,14 +114,15 @@ class ReturnCalculator:
 
     @staticmethod
     def last_confirmed_close(series):
-        """Return the last completed day's close. If the last candle is today (partial), use the one before it."""
+        """
+        Return the last available price from the series.
+        During market hours this is the live intraday price; outside hours it
+        is the most recent confirmed close. yf.download() includes today's
+        live candle when the market is open, so s.iloc[-1] is always correct.
+        """
         s = series.dropna()
         if s.empty:
             return None
-        last_date = pd.to_datetime(s.index[-1]).date()
-        today = pd.Timestamp.now().date()
-        if last_date == today:
-            return float(s.iloc[-2]) if len(s) >= 2 else None
         return float(s.iloc[-1])
 
     @staticmethod
@@ -116,11 +170,10 @@ class ReturnCalculator:
             return eligible_bwd.iloc[-1]
 
         def price_n_trading_days_ago(n):
-            # If today's partial candle is present, exclude it so we anchor to last confirmed close
-            if len(s_naive) > 0 and s_naive.index[-1].normalize() == today:
-                last_confirmed_idx = len(s_naive) - 2
-            else:
-                last_confirmed_idx = len(s_naive) - 1
+            # Anchor to the last available price (live or EOD) — always s_naive[-1].
+            # When market is open, s_naive[-1] = live price, so n=1 correctly
+            # gives yesterday's close as the base for 1D return.
+            last_confirmed_idx = len(s_naive) - 1
             target_idx = last_confirmed_idx - n
             if target_idx < 0 or last_confirmed_idx < 0:
                 return None
@@ -218,7 +271,7 @@ class YahooDataEngine:
     def __init__(self, sheet_client: GoogleSheetClient):
         self.sheet_client = sheet_client
 
-    def update_sheet(self, sheet_name, ticker_range, start_row, output_start_col):
+    def update_sheet(self, sheet_name, ticker_range, start_row, output_start_col, market="US"):
 
         print(f"Updating {sheet_name}...")
 
@@ -275,6 +328,12 @@ class YahooDataEngine:
 
         self.sheet_client.batch_update(worksheet, updates)
 
+        price_as_of, updated_at = _make_metadata(market)
+        self.sheet_client.batch_update(worksheet, [
+            {"range": "A1", "values": [[price_as_of]]},
+            {"range": "A2", "values": [[updated_at]]},
+        ])
+
         print(f"{sheet_name} updated OK\n")
 
 
@@ -323,6 +382,8 @@ class ZerodhaDataEngine:
         Fetch historical data for one index and return calculated returns.
         Designed to be called from a thread pool.
         Returns (returns_list,) — caller adds sheet_row from context.
+        Kite historical_data("day") never returns a live intraday candle, so
+        we override current_price with kite.ltp() when the India market is open.
         """
         token = self.index_token_map.get(ticker)
         if not token:
@@ -337,6 +398,18 @@ class ZerodhaDataEngine:
             close_series  = df["close"]
             current_price = ReturnCalculator.last_confirmed_close(close_series)
             open_series   = df["open"] if open_col else None
+
+            # Override with live price when India market is open
+            if _is_market_open("IN"):
+                try:
+                    ltp_key  = f"NSE:{ticker}"
+                    ltp_data = self.kite.ltp(ltp_key)
+                    ltp      = ltp_data.get(ltp_key, {}).get("last_price")
+                    if ltp:
+                        current_price = float(ltp)
+                except Exception:
+                    pass   # fall back to last historical close
+
             return ReturnCalculator.calculate(close_series, current_price, open_series)
         except Exception:
             return ["NA"] * 8
@@ -380,6 +453,13 @@ class ZerodhaDataEngine:
                 })
 
         self.sheet_client.batch_update(worksheet, updates)
+
+        price_as_of, updated_at = _make_metadata("IN")
+        self.sheet_client.batch_update(worksheet, [
+            {"range": "A1", "values": [[price_as_of]]},
+            {"range": "A2", "values": [[updated_at]]},
+        ])
+
         print("NSE Indices updated OK\n")
 
     def update_nifty_sectors(self):
@@ -419,6 +499,13 @@ class ZerodhaDataEngine:
                 })
 
         self.sheet_client.batch_update(worksheet, updates)
+
+        price_as_of, updated_at = _make_metadata("IN")
+        self.sheet_client.batch_update(worksheet, [
+            {"range": "A1", "values": [[price_as_of]]},
+            {"range": "A2", "values": [[updated_at]]},
+        ])
+
         print("NIFTY Sectors updated OK\n")
 
 
@@ -632,6 +719,13 @@ class GlobalIndicesEngine:
         t2_updates = self._build_updates(t2_rows, price_data, live_prices, all_symbols, lambda r: f"D{r}:L{r}")
 
         self.sheet_client.batch_update(worksheet, t1_updates + t2_updates)
+
+        price_as_of, updated_at = _make_metadata("US")
+        self.sheet_client.batch_update(worksheet, [
+            {"range": "A1", "values": [[price_as_of]]},
+            {"range": "A2", "values": [[updated_at]]},
+        ])
+
         print(f"  Table 1 updated — {len(t1_updates)} indices OK")
         print(f"  Table 2 updated — {len(t2_updates)} indices OK")
         print("Global Indices updated OK\n")
@@ -839,6 +933,13 @@ class ETFdbEngine:
             })
 
         self.sheet_client.batch_update(ws, price_updates)
+
+        price_as_of, updated_at = _make_metadata("US")
+        self.sheet_client.batch_update(ws, [
+            {"range": "A1", "values": [[price_as_of]]},
+            {"range": "A2", "values": [[updated_at]]},
+        ])
+
         print(f"{sheet_name} (ETFdb) updated OK\n")
 
     # ── Public entry point ────────────────────────────────────
@@ -1017,6 +1118,13 @@ class MutualFundsEngine:
             })
 
         self.sheet_client.batch_update(worksheet, updates)
+
+        price_as_of, updated_at = _make_metadata("NAV")
+        self.sheet_client.batch_update(worksheet, [
+            {"range": "A1", "values": [[price_as_of]]},
+            {"range": "A2", "values": [[updated_at]]},
+        ])
+
         print("Mutual Funds India updated OK\n")
 
 
@@ -1038,8 +1146,8 @@ class MarketUpdater:
     @property
     def _sheet_map(self):
         return {
-            "ETFs India":                   lambda: self.yahoo.update_sheet("ETFs India", "C7:C100", 7, "E"),
-            "Crypto":                        lambda: self.yahoo.update_sheet("Crypto", "B104:B118", 104, "D"),
+            "ETFs India":                   lambda: self.yahoo.update_sheet("ETFs India", "C7:C100", 7, "E", market="IN"),
+            "Crypto":                        lambda: self.yahoo.update_sheet("Crypto", "B104:B118", 104, "D", market="CRYPTO"),
             "Global Indices":               self.global_indices.update_global_indices,
             "Mutual Funds":                 self.mutual_funds.update_mutual_funds,
             "NIFTY Sectors":                self.zerodha.update_nifty_sectors,

@@ -90,6 +90,21 @@ def load_last_updated() -> str:
     return f"{now.strftime('%b')} {now.day}, {now.strftime('%Y')} {now.strftime('%I:%M %p').lstrip('0')} IST"
 
 
+# ── Stocks metadata (price as of + updated at) ────────────
+
+@st.cache_data(ttl=28800)
+def load_stocks_metadata(sheet_name: str) -> tuple[str, str]:
+    """
+    Reads A1 (price_as_of) and A2 (updated_at) written by stocks_data.py.
+    Returns (price_as_of, updated_at) strings.
+    """
+    ws   = _ws(sheet_name)
+    vals = ws.get("A1:A2")
+    price_as_of = vals[0][0] if vals and vals[0] else ""
+    updated_at  = vals[1][0] if len(vals) > 1 and vals[1] else ""
+    return price_as_of, updated_at
+
+
 # ── Section loaders ───────────────────────────────────────
 
 @st.cache_data(ttl=28800)

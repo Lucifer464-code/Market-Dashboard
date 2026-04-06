@@ -231,13 +231,23 @@ def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bo
     components.html(html, height=frame_height + 10, scrolling=False)
 
 
-def section_header(title: str, subtitle: str = ""):
-    yesterday = datetime.now() - timedelta(days=1)
-    price_date = f"Price as on {yesterday.strftime('%b')} {yesterday.day}, {yesterday.year}"
+def section_header(title: str, subtitle: str = "", price_as_of: str = "", updated_at: str = ""):
+    if price_as_of:
+        top_right = price_as_of
+    else:
+        yesterday  = datetime.now() - timedelta(days=1)
+        top_right  = f"Price as on {yesterday.strftime('%b')} {yesterday.day}, {yesterday.year}"
+    updated_html = (
+        f"<div style='font-size:10px;color:#94a3b8;margin-top:2px;text-align:right'>{updated_at}</div>"
+        if updated_at else ""
+    )
     sub_html = f"<div style='font-size:12px;color:#94a3b8;margin-top:2px'>{subtitle}</div>" if subtitle else ""
     st.markdown(
         f"<div style='padding:14px 0;border-bottom:1px solid #e2e8f0;margin-bottom:16px;overflow:hidden'>"
-        f"<span style='float:right;font-size:12px;color:#64748b;font-weight:500;margin-top:4px'>{price_date}</span>"
+        f"<div style='float:right;text-align:right'>"
+        f"<span style='font-size:12px;color:#64748b;font-weight:500'>{top_right}</span>"
+        f"{updated_html}"
+        f"</div>"
         f"<div style='font-size:18px;font-weight:700;color:#0f172a'>{title}</div>"
         f"{sub_html}"
         f"</div>",

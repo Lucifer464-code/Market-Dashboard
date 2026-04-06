@@ -45,6 +45,8 @@ import requests
 import time
 import io
 import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from google.oauth2.service_account import Credentials
@@ -339,9 +341,26 @@ class StocksDataEngine:
         print(f"  Market caps: {len(mcap_map)}/{len(tickers)} tickers resolved")
         return mcap_map
 
+    # ── Market hours check ────────────────────────────────────
+
+    @staticmethod
+    def _is_market_open(market: str) -> bool:
+        """Return True if the given market is currently in its regular session."""
+        if market == "US":
+            tz      = ZoneInfo("America/New_York")
+            now     = datetime.now(tz)
+            open_t  = now.replace(hour=9,  minute=30, second=0, microsecond=0)
+            close_t = now.replace(hour=16, minute=0,  second=0, microsecond=0)
+        else:  # IN
+            tz      = ZoneInfo("Asia/Kolkata")
+            now     = datetime.now(tz)
+            open_t  = now.replace(hour=9,  minute=15, second=0, microsecond=0)
+            close_t = now.replace(hour=15, minute=30, second=0, microsecond=0)
+        return now.weekday() < 5 and open_t <= now <= close_t
+
     # ── Price history fetch ───────────────────────────────────
 
-    def _fetch_price_history(self, tickers: list, mcap_map: dict) -> pd.DataFrame:
+    def _fetch_price_history(self, tickers: list, mcap_map: dict, market: str = "US") -> pd.DataFrame:
         """
         FIX (3Y returning NA): Download 4Y of history instead of 3Y.
         With period="3y", the oldest available candle sits exactly at the
@@ -353,14 +372,30 @@ class StocksDataEngine:
             Ticker | MarketCap | Price | ATH | PctFromATH |
             Change1W | Change1M | Change3M | Change6M | Change1Y | Change3Y
         """
-        all_rows  = []
-        last_date = None
-        batches   = [
+        all_rows    = []
+        last_date   = None
+        market_open = self._is_market_open(market)
+        batches     = [
             tickers[i:i + self.PRICE_BATCH_SIZE]
             for i in range(0, len(tickers), self.PRICE_BATCH_SIZE)
         ]
         total_b = len(batches)
         print(f"  Fetching price history — {len(tickers)} tickers, {total_b} batches...")
+
+        # Build the "price as of" label for the sheet header
+        if market_open:
+            _tz_name  = "America/New_York" if market == "US" else "Asia/Kolkata"
+            _tz_label = "ET" if market == "US" else "IST"
+            _tz       = ZoneInfo(_tz_name)
+            _now      = datetime.now(_tz)
+            price_as_of = (
+                f"Price as on {_now.strftime('%b')} {_now.day}, {_now.year}"
+                f"  ·  {int(_now.strftime('%I'))}:{_now.strftime('%M %p')} {_tz_label}"
+                f"  (Live)"
+            )
+            print(f"  Market is OPEN — live prices will be used where available")
+        else:
+            price_as_of = None   # filled from last_date after batch loop
 
         today = pd.Timestamp.now().normalize()
 
@@ -383,6 +418,32 @@ class StocksDataEngine:
                     progress    = False,
                 )
 
+                # Fetch live prices if market is open
+                live_prices = {}
+                if market_open:
+                    try:
+                        intraday = yf.download(
+                            batch,
+                            period   = "1d",
+                            interval = "1m",
+                            group_by = "ticker",
+                            threads  = True,
+                            progress = False,
+                        )
+                        for sym in batch:
+                            try:
+                                col = (
+                                    intraday["Close"] if len(batch) == 1
+                                    else intraday[sym]["Close"]
+                                )
+                                col = col.dropna()
+                                if not col.empty:
+                                    live_prices[sym] = float(col.iloc[-1])
+                            except Exception:
+                                pass
+                    except Exception as e:
+                        print(f"\n  [WARN] Live price fetch failed: {e}")
+
                 for symbol in batch:
                     try:
                         close = (
@@ -402,17 +463,28 @@ class StocksDataEngine:
                             idx_naive = raw_idx
                         s = pd.Series(close.values, index=idx_naive)
 
-                        # Current price = last confirmed close
+                        # Last confirmed close (yesterday or earlier)
                         s_confirmed = s[idx_naive.normalize() < today]
                         if s_confirmed.empty:
                             continue
-                        price = float(s_confirmed.iloc[-1])
+                        prev_close     = float(s_confirmed.iloc[-1])
                         confirmed_date = s_confirmed.index[-1]
                         if last_date is None or confirmed_date > last_date:
                             last_date = confirmed_date
 
-                        # ATH within the full 4Y window
-                        ath          = float(s.max())
+                        # Use live price when market is open and data is available
+                        if symbol in live_prices:
+                            price     = live_prices[symbol]
+                            change_1d = (price / prev_close - 1) * 100 if prev_close != 0 else np.nan
+                        else:
+                            price     = prev_close
+                            change_1d = (
+                                (price / float(s_confirmed.iloc[-2]) - 1) * 100
+                                if len(s_confirmed) >= 2 else np.nan
+                            )
+
+                        # ATH: extend to live price in case of intraday new high
+                        ath          = max(float(s.max()), price)
                         pct_from_ath = (price / ath - 1) * 100
 
                         # Market cap from pre-fetched map
@@ -429,13 +501,9 @@ class StocksDataEngine:
                             past = float(eligible.iloc[-1])
                             return (price / past - 1) * 100 if past != 0 else np.nan
 
-                        change_1d = (
-                            (price / float(s_confirmed.iloc[-2]) - 1) * 100
-                            if len(s_confirmed) >= 2 else np.nan
-                        )
                         change_1w = (
-                            (price / float(s.iloc[-6]) - 1) * 100
-                            if len(s) >= 6 else np.nan
+                            (price / float(s_confirmed.iloc[-6]) - 1) * 100
+                            if len(s_confirmed) >= 6 else np.nan
                         )
 
                         all_rows.append({
@@ -461,7 +529,15 @@ class StocksDataEngine:
             except Exception as e:
                 print(f"\n  [WARN] Batch {batch_idx} error: {e}")
 
-        return pd.DataFrame(all_rows), last_date
+        # Finalise EOD label using the last confirmed date across all stocks
+        if price_as_of is None:
+            if last_date is not None:
+                ld = pd.Timestamp(last_date)
+                price_as_of = f"Price as on {ld.strftime('%b')} {ld.day}, {ld.year}  (Close)"
+            else:
+                price_as_of = "Price as on —  (Close)"
+
+        return pd.DataFrame(all_rows), last_date, price_as_of
 
     # ── Sheets API format request builder ────────────────────
 
@@ -682,10 +758,12 @@ class StocksDataEngine:
 
     def _write_gl_sheet(
         self,
-        sheet_name: str,
-        gainers:    pd.DataFrame,
-        losers:     pd.DataFrame,
-        label:      str,
+        sheet_name:  str,
+        gainers:     pd.DataFrame,
+        losers:      pd.DataFrame,
+        label:       str,
+        price_as_of: str = "",
+        updated_at:  str = "",
     ):
         """
         FIX (Losers layout): Losers now sit in Col F-I alongside gainers
@@ -700,6 +778,10 @@ class StocksDataEngine:
         updates = []
         col_hdr = [["Ticker", "Name", "Market Cap", "Change 1W"]]
         empty   = ["", "", "", ""]
+
+        # ── Metadata (rows 1-2, read by dashboard) ────────────
+        updates.append({"range": "A1", "values": [[price_as_of]]})
+        updates.append({"range": "A2", "values": [[updated_at]]})
 
         # ── Gainers block (Col A-D) ────────────────────────────
         updates.append({"range": "A3:D3", "values": [[f"Top {self.TOP_N} Gainers - 1 Week", "", "", ""]]})
@@ -743,12 +825,16 @@ class StocksDataEngine:
 
     def _write_ath_sheet(
         self,
-        sheet_name: str,
-        df:         pd.DataFrame,
-        label:      str,
+        sheet_name:  str,
+        df:          pd.DataFrame,
+        label:       str,
+        price_as_of: str = "",
+        updated_at:  str = "",
     ):
         """
         FIX (data starts from row 5):
+            Row 1  : price_as_of metadata (read by dashboard)
+            Row 2  : updated_at metadata  (read by dashboard)
             Row 3  : Section label
             Row 4  : Column headers
             Row 5+ : Data rows
@@ -762,6 +848,10 @@ class StocksDataEngine:
             "Ticker", "Name", "Market Cap", "ATH", "ATH %",
             "Price", "1D%", "1W%", "1M%", "3M%", "6M%", "1Y%", "3Y%",
         ]]
+
+        # ── Metadata (rows 1-2, read by dashboard) ────────────
+        updates.append({"range": "A1", "values": [[price_as_of]]})
+        updates.append({"range": "A2", "values": [[updated_at]]})
 
         if df.empty:
             updates.append({"range": "A3:M3", "values": [["No stocks currently at all-time high"] + [""] * (ncols - 1)]})
@@ -805,6 +895,14 @@ class StocksDataEngine:
     def run(self, run_gl: bool = True, run_ath: bool = True):
         print("\n===== STOCKS DATA UPDATE =====\n")
 
+        # Compute "updated at" timestamp once for this run (IST)
+        _ist = ZoneInfo("Asia/Kolkata")
+        _now = datetime.now(_ist)
+        updated_at = (
+            f"Updated {_now.strftime('%b')} {_now.day}, {_now.year}"
+            f"  ·  {int(_now.strftime('%I'))}:{_now.strftime('%M %p')} IST"
+        )
+
         # Load name cache once — shared across all markets
         name_cache = self._load_name_cache()
         print(f"Name cache: {len(name_cache)} tickers already known\n")
@@ -829,18 +927,20 @@ class StocksDataEngine:
             us_filtered = [t for t in us_tickers if us_mcaps.get(t, 0) >= self.US_MCAP_FLOOR]
             print(f"  Market cap filter: {len(us_filtered)}/{len(us_tickers)} tickers pass ${self.US_MCAP_FLOOR/1e9:.0f}B floor")
 
-            us_df, us_as_of = self._fetch_price_history(us_filtered, us_mcaps)
+            us_df, us_last_date, us_price_label = self._fetch_price_history(us_filtered, us_mcaps, market="US")
 
             if run_gl:
                 us_gainers, us_losers = self._derive_gl(us_df, name_cache, "US")
                 if not us_gainers.empty:
-                    self._write_gl_sheet("Top G&L US", us_gainers, us_losers, "US")
+                    self._write_gl_sheet("Top G&L US", us_gainers, us_losers, "US",
+                                         price_as_of=us_price_label, updated_at=updated_at)
                 else:
                     print("  [WARN] US G&L: no stocks passed market cap filter.")
 
             if run_ath:
                 us_ath = self._derive_ath(us_df, name_cache, "US")
-                self._write_ath_sheet("ATH US", us_ath, "US")
+                self._write_ath_sheet("ATH US", us_ath, "US",
+                                      price_as_of=us_price_label, updated_at=updated_at)
         else:
             print("  [SKIP] US universe unavailable.")
 
@@ -866,18 +966,20 @@ class StocksDataEngine:
             in_filtered = [t for t in in_tickers if in_mcaps.get(t, 0) >= self.IN_MCAP_FLOOR]
             print(f"  Market cap filter: {len(in_filtered)}/{len(in_tickers)} tickers pass Rs{self.IN_MCAP_FLOOR/1e7:.0f}Cr floor")
 
-            in_df, in_as_of = self._fetch_price_history(in_filtered, in_mcaps)
+            in_df, in_last_date, in_price_label = self._fetch_price_history(in_filtered, in_mcaps, market="IN")
 
             if run_gl:
                 in_gainers, in_losers = self._derive_gl(in_df, name_cache, "IN")
                 if not in_gainers.empty:
-                    self._write_gl_sheet("Top G&L India", in_gainers, in_losers, "India")
+                    self._write_gl_sheet("Top G&L India", in_gainers, in_losers, "India",
+                                         price_as_of=in_price_label, updated_at=updated_at)
                 else:
                     print("  [WARN] India G&L: no stocks passed market cap filter.")
 
             if run_ath:
                 in_ath = self._derive_ath(in_df, name_cache, "IN")
-                self._write_ath_sheet("ATH India", in_ath, "India")
+                self._write_ath_sheet("ATH India", in_ath, "India",
+                                      price_as_of=in_price_label, updated_at=updated_at)
         else:
             print("  [SKIP] India universe unavailable.")
 

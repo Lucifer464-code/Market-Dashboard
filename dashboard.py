@@ -240,7 +240,9 @@ section = st.session_state.section
 
 if section == "Global Indices":
     t1, t2 = data.load_global_indices()
-    ui.section_header("Global Indices", "Major market indices worldwide")
+    price_as_of, updated_at = data.load_stocks_metadata("Global Indices")
+    ui.section_header("Global Indices", "Major market indices worldwide",
+                      price_as_of=price_as_of, updated_at=updated_at)
     t1 = ui.sort_by_keyword(t1, "5d")
     t2 = ui.sort_by_keyword(t2, "5d") if not t2.empty else t2
     ui.render_stat_cards(t1)
@@ -251,7 +253,9 @@ if section == "Global Indices":
 
 elif section == "Additional NIFTY Sector Indices":
     t1, _ = data.load_nifty_indices()
-    ui.section_header("Additional NIFTY Sector Indices", "NSE India sector index returns")
+    price_as_of, updated_at = data.load_stocks_metadata("NIFTY Indices")
+    ui.section_header("Additional NIFTY Sector Indices", "NSE India sector index returns",
+                      price_as_of=price_as_of, updated_at=updated_at)
     t1 = t1.drop(t1.columns[1], axis=1)
     t1 = ui.sort_by_keyword(t1, "5d")
     ui.render_stat_cards(t1)
@@ -259,7 +263,9 @@ elif section == "Additional NIFTY Sector Indices":
 
 elif section == "Broad Market Indices":
     _, t2 = data.load_nifty_indices()
-    ui.section_header("Broad Market Indices", "NSE India broad market index returns")
+    price_as_of, updated_at = data.load_stocks_metadata("NIFTY Indices")
+    ui.section_header("Broad Market Indices", "NSE India broad market index returns",
+                      price_as_of=price_as_of, updated_at=updated_at)
     if not t2.empty:
         t2 = t2.drop(t2.columns[1], axis=1)
         t2 = ui.sort_by_keyword(t2, "5d")
@@ -268,7 +274,9 @@ elif section == "Broad Market Indices":
 
 elif section == "NIFTY Sectors":
     df = data.load_nifty_sectors()
-    ui.section_header("NIFTY Sectors", "Sector-wise returns — India")
+    price_as_of, updated_at = data.load_stocks_metadata("NIFTY Sectors")
+    ui.section_header("NIFTY Sectors", "Sector-wise returns — India",
+                      price_as_of=price_as_of, updated_at=updated_at)
     df = df.drop(df.columns[1], axis=1)
     df = ui.sort_by_keyword(df, "5d")
     ui.render_stat_cards(df)
@@ -276,37 +284,50 @@ elif section == "NIFTY Sectors":
 
 elif section == "ETFs US":
     df = data.load_etfs_us()
-    ui.section_header("ETFs US", "Top US ETFs by AUM")
+    price_as_of, updated_at = data.load_stocks_metadata("ETFs US")
+    ui.section_header("ETFs US", "Top US ETFs by AUM",
+                      price_as_of=price_as_of, updated_at=updated_at)
     df = df.drop(df.columns[2], axis=1)
     ui.render_table(df, height=620)
 
 elif section == "Leveraged Funds":
     df = data.load_leveraged_funds()
-    ui.section_header("Leveraged Funds", "Biggest leveraged ETFs")
+    price_as_of, updated_at = data.load_stocks_metadata("Biggest Leveraged Funds ")
+    ui.section_header("Leveraged Funds", "Biggest leveraged ETFs",
+                      price_as_of=price_as_of, updated_at=updated_at)
     df = df.drop(df.columns[3], axis=1)
     ui.render_table(df)
 
 elif section == "ETFs India":
     df = data.load_etfs_india()
-    ui.section_header("ETFs India", "Indian exchange-listed ETFs")
+    price_as_of, updated_at = data.load_stocks_metadata("ETFs India")
+    ui.section_header("ETFs India", "Indian exchange-listed ETFs",
+                      price_as_of=price_as_of, updated_at=updated_at)
     df = df.drop(df.columns[1], axis=1)
     ui.render_table(df, bold_first_col=False)
 
 elif section == "Crypto":
     df = data.load_crypto()
-    ui.section_header("Crypto", "Top cryptocurrencies by market cap")
+    price_as_of, updated_at = data.load_stocks_metadata("Crypto")
+    ui.section_header("Crypto", "Top cryptocurrencies by market cap",
+                      price_as_of=price_as_of, updated_at=updated_at)
     ui.render_table(df)
 
 elif section == "Mutual Funds India":
     df = data.load_mutual_funds()
-    ui.section_header("Mutual Funds India", "NAV and returns")
+    price_as_of, updated_at = data.load_stocks_metadata("Mutual Funds India")
+    ui.section_header("Mutual Funds India", "NAV and returns",
+                      price_as_of=price_as_of, updated_at=updated_at)
     ui.render_table(df, height=620, bold_first_col=False)
 
 elif section == "Gainers & Losers US":
     gainers, losers = data.load_gl_us()
+    price_as_of, updated_at = data.load_stocks_metadata("Top G&L US")
     ui.section_header(
         "Gainers & Losers — US",
         "Top 15 weekly gainers and losers · Russell 3000 ($2B+ market cap)",
+        price_as_of=price_as_of,
+        updated_at=updated_at,
     )
     col1, col2 = st.columns(2)
     with col1:
@@ -318,9 +339,12 @@ elif section == "Gainers & Losers US":
 
 elif section == "Gainers & Losers India":
     gainers, losers = data.load_gl_india()
+    price_as_of, updated_at = data.load_stocks_metadata("Top G&L India")
     ui.section_header(
         "Gainers & Losers — India",
         "Top 15 weekly gainers and losers · NIFTY 500 (Rs1000Cr+ market cap)",
+        price_as_of=price_as_of,
+        updated_at=updated_at,
     )
     col1, col2 = st.columns(2)
     with col1:
@@ -332,16 +356,22 @@ elif section == "Gainers & Losers India":
 
 elif section == "ATH US":
     df = data.load_ath_us()
+    price_as_of, updated_at = data.load_stocks_metadata("ATH US")
     ui.section_header(
         "All-Time High — US",
         "Stocks within 1% of all-time high · sorted by 1W%",
+        price_as_of=price_as_of,
+        updated_at=updated_at,
     )
     ui.render_table(df, height=620)
 
 elif section == "ATH India":
     df = data.load_ath_india()
+    price_as_of, updated_at = data.load_stocks_metadata("ATH India")
     ui.section_header(
         "All-Time High — India",
         "Stocks within 1% of all-time high · sorted by 1W%",
+        price_as_of=price_as_of,
+        updated_at=updated_at,
     )
     ui.render_table(df, height=620)
