@@ -414,6 +414,12 @@ class ZerodhaDataEngine:
         except Exception:
             return ["NA"] * 8
 
+    def get_returns(self, zerodha_ticker: str) -> list:
+        """Fetch returns for one index without writing to any sheet."""
+        end_date   = datetime.now()
+        start_date = end_date - relativedelta(years=4)
+        return self._fetch_index_returns(zerodha_ticker, start_date, end_date)
+
     def update_nifty_indices(self):
 
         print("Updating NSE Indices...")
@@ -680,27 +686,32 @@ class GlobalIndicesEngine:
 
     # ── Build update dicts from pre-fetched data ──────────────
 
-    def _build_updates(self, ticker_rows, price_data, live_prices, all_symbols, range_fn):
-        updates = []
+    def _build_updates(self, ticker_rows, price_data, live_prices, all_symbols, range_fn, overrides=None):
+        overrides = overrides or {}
+        updates   = []
         for ticker, sheet_row in ticker_rows:
-            try:
-                # Pass all_symbols (the full download list) so _extract_close
-                # correctly identifies single- vs multi-ticker DataFrames.
-                close_series  = _extract_close(price_data, ticker, all_symbols)
-                if close_series is None or close_series.empty:
-                    raise ValueError(f"no data for {ticker}")
-                current_price = live_prices.get(ticker)
-                returns       = ReturnCalculator.calculate(close_series, current_price)
-            except Exception as e:
-                print(f"  [WARN] {ticker}: {e}")
-                returns = ["NA"] * 8
-            returns = ReturnCalculator.clean(returns) + ["NA"]   # pad 5Y column
+            if ticker in overrides:
+                # Use pre-fetched returns from another engine (e.g. Zerodha for NIFTY 50)
+                returns = ReturnCalculator.clean(overrides[ticker]) + ["NA"]
+            else:
+                try:
+                    # Pass all_symbols (the full download list) so _extract_close
+                    # correctly identifies single- vs multi-ticker DataFrames.
+                    close_series  = _extract_close(price_data, ticker, all_symbols)
+                    if close_series is None or close_series.empty:
+                        raise ValueError(f"no data for {ticker}")
+                    current_price = live_prices.get(ticker)
+                    returns       = ReturnCalculator.calculate(close_series, current_price)
+                except Exception as e:
+                    print(f"  [WARN] {ticker}: {e}")
+                    returns = ["NA"] * 8
+                returns = ReturnCalculator.clean(returns) + ["NA"]   # pad 5Y column
             updates.append({"range": range_fn(sheet_row), "values": [returns]})
         return updates
 
     # ── Single entry point ────────────────────────────────────
 
-    def update_global_indices(self):
+    def update_global_indices(self, overrides=None):
         print("Updating Global Indices...")
         worksheet = self.sheet_client.get_worksheet("Global Indices")
 
@@ -715,8 +726,8 @@ class GlobalIndicesEngine:
 
         price_data, live_prices = self._fetch_data(all_symbols)
 
-        t1_updates = self._build_updates(t1_rows, price_data, live_prices, all_symbols, lambda r: f"D{r}:L{r}")
-        t2_updates = self._build_updates(t2_rows, price_data, live_prices, all_symbols, lambda r: f"D{r}:L{r}")
+        t1_updates = self._build_updates(t1_rows, price_data, live_prices, all_symbols, lambda r: f"D{r}:L{r}", overrides)
+        t2_updates = self._build_updates(t2_rows, price_data, live_prices, all_symbols, lambda r: f"D{r}:L{r}", overrides)
 
         self.sheet_client.batch_update(worksheet, t1_updates + t2_updates)
 
@@ -1134,6 +1145,14 @@ class MutualFundsEngine:
 
 class MarketUpdater:
 
+    # Zerodha ticker → yfinance symbol for indices that appear in both
+    # Global Indices (yfinance) and NIFTY tabs (Zerodha).
+    # Zerodha is the authoritative source for these — its returns are injected
+    # into Global Indices so both tabs always show identical numbers.
+    _ZERODHA_GLOBAL_OVERRIDES = {
+        "NIFTY 50": "^NSEI",
+    }
+
     def __init__(self):
         self.config        = Config()
         self.sheet_client  = GoogleSheetClient(self.config)
@@ -1143,12 +1162,25 @@ class MarketUpdater:
         self.global_indices = GlobalIndicesEngine(self.sheet_client)
         self.mutual_funds   = MutualFundsEngine(self.sheet_client)
 
+    def _global_indices_overrides(self) -> dict:
+        """Fetch returns from Zerodha for indices shared with NIFTY tabs."""
+        overrides = {}
+        for zerodha_ticker, yf_symbol in self._ZERODHA_GLOBAL_OVERRIDES.items():
+            try:
+                returns = self.zerodha.get_returns(zerodha_ticker)
+                if returns and returns != ["NA"] * 8:
+                    overrides[yf_symbol] = returns
+                    print(f"  Global Indices override: {zerodha_ticker} → {yf_symbol} (Zerodha)")
+            except Exception as e:
+                print(f"  [WARN] Zerodha override failed for {zerodha_ticker}: {e}")
+        return overrides
+
     @property
     def _sheet_map(self):
         return {
             "ETFs India":                   lambda: self.yahoo.update_sheet("ETFs India", "C7:C100", 7, "E", market="IN"),
             "Crypto":                        lambda: self.yahoo.update_sheet("Crypto", "B104:B118", 104, "D", market="CRYPTO"),
-            "Global Indices":               self.global_indices.update_global_indices,
+            "Global Indices":               lambda: self.global_indices.update_global_indices(self._global_indices_overrides()),
             "Mutual Funds":                 self.mutual_funds.update_mutual_funds,
             "NIFTY Sectors":                self.zerodha.update_nifty_sectors,
             "NIFTY Indices":                self.zerodha.update_nifty_indices,
