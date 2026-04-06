@@ -173,7 +173,9 @@ NAV = {
         ("Leveraged Funds",    "Leveraged Funds"),
         ("ETFs India",         "ETFs India"),
         ("Mutual Funds India", "Mutual Funds India"),
-        ("Crypto",             "Crypto"),
+    ],
+    "CRYPTO": [
+        ("Crypto", "Crypto"),
     ],
     "STOCKS": [
         ("Gainers & Losers US",    "Gainers & Losers US"),
