@@ -1318,10 +1318,11 @@ class MarketUpdater:
             multiple yf.download() calls run concurrently.
             """
             for name, fn in [
-                ("ETFs India",     lambda: self.yahoo.update_sheet("ETFs India", "C7:C100", 7, "E")),
-                ("Crypto",         lambda: self.yahoo.update_sheet("Crypto", "B104:B118", 104, "D")),
-                ("Global Indices", self.global_indices.update_global_indices),
-                ("ETFdb Sheets",   self.etfdb.update_all),
+                ("ETFs India",      lambda: self.yahoo.update_sheet("ETFs India", "C7:C100", 7, "E")),
+                ("Crypto",          lambda: self.yahoo.update_sheet("Crypto", "B104:B118", 104, "D")),
+                ("Global Indices",  self.global_indices.update_global_indices),
+                ("S&P500 Sectors",  self.sp500_sectors.update_sp500_sectors),
+                ("ETFdb Sheets",    self.etfdb.update_all),
             ]:
                 try:
                     fn()
