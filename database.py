@@ -788,7 +788,7 @@ class ETFdbEngine:
             # adjust etfdb_type to "Commodity ETFs" if you want non-leveraged.
             "etfdb_type":  "Leveraged ETFs",
             "n":           7,
-            "start_row":   4,
+            "start_row":   5,
             "ticker_col":  "A",
             "name_col":    "B",
             "aum_col":     "C",
