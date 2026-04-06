@@ -264,6 +264,7 @@ elif section == "S&P 500 Sectors":
     price_as_of, updated_at = data.load_stocks_metadata("S&P500 Sectors")
     ui.section_header("S&P 500 Sectors", "S&P 500 sector returns — GICS classification",
                       price_as_of=price_as_of, updated_at=updated_at)
+    df = df.drop(df.columns[1], axis=1)
     df = ui.sort_by_keyword(df, "5d")
     ui.render_stat_cards(df)
     ui.render_table(df, bold_first_col=False)
