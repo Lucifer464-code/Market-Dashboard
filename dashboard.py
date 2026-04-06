@@ -162,6 +162,7 @@ if "section" not in st.session_state:
 NAV = {
     "MARKETS": [
         ("Global Indices",                  "Global Indices"),
+        ("Additional Global Indices",       "Additional Global Indices"),
         ("NIFTY Sectoral Indices",                   "NIFTY Sectors"),
         ("Additional NIFTY Sectoral Indices", "Additional NIFTY Sector Indices"),
         ("Broad Market Indices",            "Broad Market Indices"),
@@ -239,16 +240,22 @@ ui.mobile_nav(st.session_state.section)
 section = st.session_state.section
 
 if section == "Global Indices":
-    t1, t2 = data.load_global_indices()
+    t1, _ = data.load_global_indices()
     price_as_of, updated_at = data.load_stocks_metadata("Global Indices")
     ui.section_header("Global Indices", "Major market indices worldwide",
                       price_as_of=price_as_of, updated_at=updated_at)
     t1 = ui.sort_by_keyword(t1, "5d")
-    t2 = ui.sort_by_keyword(t2, "5d") if not t2.empty else t2
     ui.render_stat_cards(t1)
     ui.render_table(t1, bold_first_col=False)
+
+elif section == "Additional Global Indices":
+    _, t2 = data.load_global_indices()
+    price_as_of, updated_at = data.load_stocks_metadata("Global Indices")
+    ui.section_header("Additional Global Indices", "More market indices worldwide",
+                      price_as_of=price_as_of, updated_at=updated_at)
     if not t2.empty:
-        ui.secondary_label("More Indices")
+        t2 = ui.sort_by_keyword(t2, "5d")
+        ui.render_stat_cards(t2)
         ui.render_table(t2, height=600, bold_first_col=False)
 
 elif section == "Additional NIFTY Sector Indices":
