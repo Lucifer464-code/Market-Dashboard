@@ -1187,8 +1187,22 @@ class SP500SectorsEngine:
     def update_sp500_sectors(self):
         print("Updating S&P 500 Sectors...")
 
-        ws         = self.sheet_client.get_worksheet("S&P500 Sectors")
-        symbols    = list(self.SECTORS.values())
+        ws   = self.sheet_client.get_worksheet("S&P500 Sectors")
+        rows = ws.get("C4:C14")   # tickers pre-filled by user in col C
+
+        tickers = []
+        row_pointer = 4
+        for r in rows:
+            symbol = r[0].strip() if r else ""
+            if symbol:
+                tickers.append((symbol, row_pointer))
+            row_pointer += 1
+
+        if not tickers:
+            print("  [SKIP] No tickers found in C4:C14")
+            return
+
+        symbols    = [t[0] for t in tickers]
         end_date   = datetime.now()
         start_date = end_date - relativedelta(years=4)
 
@@ -1201,13 +1215,7 @@ class SP500SectorsEngine:
         )
 
         updates = []
-        updates.append({
-            "range":  "B3:K3",
-            "values": [["Sector", "Ticker", "Price", "1D", "5D", "1M", "3M", "6M", "1Y", "3Y"]],
-        })
-
-        rows = []
-        for name, symbol in self.SECTORS.items():
+        for symbol, sheet_row in tickers:
             try:
                 close = _extract_close(data, symbol, symbols)
                 if close is None or close.empty:
@@ -1215,14 +1223,12 @@ class SP500SectorsEngine:
                 current_price = ReturnCalculator.last_confirmed_close(close)
                 returns       = ReturnCalculator.calculate(close, current_price)
             except Exception as e:
-                print(f"  [WARN] {name} ({symbol}): {e}")
+                print(f"  [WARN] {symbol}: {e}")
                 returns = ["NA"] * 8
-            rows.append([name, symbol] + ReturnCalculator.clean(returns))
-
-        # Pad to always clear all 11 rows
-        blank = [""] * 10
-        rows += [blank] * (11 - len(rows))
-        updates.append({"range": "B4:K14", "values": rows})
+            updates.append({
+                "range":  f"D{sheet_row}:K{sheet_row}",
+                "values": [ReturnCalculator.clean(returns)],
+            })
 
         self.sheet_client.batch_update(ws, updates)
 
