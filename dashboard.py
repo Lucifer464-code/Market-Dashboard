@@ -161,11 +161,12 @@ if "section" not in st.session_state:
 # ── Sidebar navigation ─────────────────────────────────────
 NAV = {
     "MARKETS": [
-        ("Global Indices",                  "Global Indices"),
-        ("Additional Global Indices",       "Additional Global Indices"),
-        ("NIFTY Sectoral Indices",                   "NIFTY Sectors"),
+        ("Global Indices",                    "Global Indices"),
+        ("Additional Global Indices",         "Additional Global Indices"),
+        ("S&P 500 Sectors",                   "S&P 500 Sectors"),
+        ("NIFTY Sectoral Indices",            "NIFTY Sectors"),
         ("Additional NIFTY Sectoral Indices", "Additional NIFTY Sector Indices"),
-        ("Broad Market Indices",            "Broad Market Indices"),
+        ("Broad Market Indices",              "Broad Market Indices"),
     ],
     "FUNDS": [
         ("ETFs US",            "ETFs US"),
@@ -257,6 +258,15 @@ elif section == "Additional Global Indices":
         t2 = ui.sort_by_keyword(t2, "5d")
         ui.render_stat_cards(t2)
         ui.render_table(t2, height=600, bold_first_col=False)
+
+elif section == "S&P 500 Sectors":
+    df = data.load_sp500_sectors()
+    price_as_of, updated_at = data.load_stocks_metadata("S&P 500 Sectors")
+    ui.section_header("S&P 500 Sectors", "S&P 500 sector returns — GICS classification",
+                      price_as_of=price_as_of, updated_at=updated_at)
+    df = ui.sort_by_keyword(df, "5d")
+    ui.render_stat_cards(df)
+    ui.render_table(df, bold_first_col=False)
 
 elif section == "Additional NIFTY Sector Indices":
     t1, _ = data.load_nifty_indices()

@@ -108,6 +108,12 @@ def load_stocks_metadata(sheet_name: str) -> tuple:
 # ── Section loaders ───────────────────────────────────────
 
 @st.cache_data(ttl=28800)
+def load_sp500_sectors():
+    ws = _ws("S&P 500 Sectors")
+    return _range_to_df(ws, "A4:I15")
+
+
+@st.cache_data(ttl=28800)
 def load_global_indices():
     ws = _ws("Global Indices")
     t1 = _range_to_df(ws, "B4:K17")

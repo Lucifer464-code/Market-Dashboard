@@ -1151,6 +1151,90 @@ class MutualFundsEngine:
 
 
 # ======================================================
+# S&P 500 SECTORS ENGINE
+# ======================================================
+
+class SP500SectorsEngine:
+    """
+    Fetches price + return data for the 11 GICS-based S&P 500 sector indices
+    from yfinance and writes them to the 'S&P 500 Sectors' sheet.
+
+    Sheet layout:
+        A1       : price_as_of metadata
+        A2       : updated_at  metadata
+        A3:I3    : Section label
+        A4:I4    : Column headers
+        A5:I15   : 11 sector rows (Sector | Price | 1D% | 5D% | 1M% | 3M% | 6M% | 1Y% | 3Y%)
+    """
+
+    SECTORS = {
+        "Communication Services": "^SP500-50",
+        "Consumer Discretionary": "^SP500-25",
+        "Consumer Staples":       "^SP500-30",
+        "Energy":                 "^SP500-10",
+        "Financials":             "^SP500-40",
+        "Health Care":            "^SP500-35",
+        "Industrials":            "^SP500-20",
+        "Information Technology": "^SP500-45",
+        "Materials":              "^SP500-15",
+        "Real Estate":            "^SP500-60",
+        "Utilities":              "^SP500-55",
+    }
+
+    def __init__(self, sheet_client: GoogleSheetClient):
+        self.sheet_client = sheet_client
+
+    def update_sp500_sectors(self):
+        print("Updating S&P 500 Sectors...")
+
+        ws         = self.sheet_client.get_worksheet("S&P 500 Sectors")
+        symbols    = list(self.SECTORS.values())
+        end_date   = datetime.now()
+        start_date = end_date - relativedelta(years=4)
+
+        data = yf.download(
+            symbols,
+            start       = start_date,
+            auto_adjust = True,
+            repair      = True,
+            progress    = False,
+        )
+
+        updates = []
+        updates.append({"range": "A3:I3", "values": [["S&P 500 Sectors — GICS"] + [""] * 8]})
+        updates.append({"range": "A4:I4", "values": [["Sector", "Price", "1D%", "5D%", "1M%", "3M%", "6M%", "1Y%", "3Y%"]]})
+
+        rows = []
+        for name, symbol in self.SECTORS.items():
+            try:
+                close = _extract_close(data, symbol, symbols)
+                if close is None or close.empty:
+                    raise ValueError(f"no data for {symbol}")
+                current_price = ReturnCalculator.last_confirmed_close(close)
+                returns       = ReturnCalculator.calculate(close, current_price)
+            except Exception as e:
+                print(f"  [WARN] {name} ({symbol}): {e}")
+                returns = ["NA"] * 8
+            rows.append([name] + ReturnCalculator.clean(returns))
+
+        if rows:
+            # Pad to always clear 11 rows
+            blank = [""] * 9
+            rows += [blank] * (11 - len(rows))
+            updates.append({"range": "A5:I15", "values": rows})
+
+        self.sheet_client.batch_update(ws, updates)
+
+        price_as_of, updated_at = _make_metadata("US")
+        self.sheet_client.batch_update(ws, [
+            {"range": "A1", "values": [[price_as_of]]},
+            {"range": "A2", "values": [[updated_at]]},
+        ])
+
+        print("S&P 500 Sectors updated OK\n")
+
+
+# ======================================================
 # MAIN ORCHESTRATOR
 # ======================================================
 
@@ -1165,13 +1249,14 @@ class MarketUpdater:
     }
 
     def __init__(self):
-        self.config        = Config()
-        self.sheet_client  = GoogleSheetClient(self.config)
-        self.yahoo         = YahooDataEngine(self.sheet_client)
-        self.etfdb         = ETFdbEngine(self.sheet_client)
-        self.zerodha       = ZerodhaDataEngine(self.config, self.sheet_client)
+        self.config         = Config()
+        self.sheet_client   = GoogleSheetClient(self.config)
+        self.yahoo          = YahooDataEngine(self.sheet_client)
+        self.etfdb          = ETFdbEngine(self.sheet_client)
+        self.zerodha        = ZerodhaDataEngine(self.config, self.sheet_client)
         self.global_indices = GlobalIndicesEngine(self.sheet_client)
         self.mutual_funds   = MutualFundsEngine(self.sheet_client)
+        self.sp500_sectors  = SP500SectorsEngine(self.sheet_client)
 
     def _global_indices_overrides(self) -> dict:
         """Fetch returns from Zerodha for indices shared with NIFTY tabs."""
@@ -1192,6 +1277,7 @@ class MarketUpdater:
             "ETFs India":                   lambda: self.yahoo.update_sheet("ETFs India", "C7:C100", 7, "E", market="IN"),
             "Crypto":                        lambda: self.yahoo.update_sheet("Crypto", "B104:B118", 104, "D", market="CRYPTO"),
             "Global Indices":               lambda: self.global_indices.update_global_indices(self._global_indices_overrides()),
+            "S&P 500 Sectors":             self.sp500_sectors.update_sp500_sectors,
             "Mutual Funds":                 self.mutual_funds.update_mutual_funds,
             "NIFTY Sectors":                self.zerodha.update_nifty_sectors,
             "NIFTY Indices":                self.zerodha.update_nifty_indices,
