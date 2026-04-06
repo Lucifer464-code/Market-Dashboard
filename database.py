@@ -51,6 +51,17 @@ def _make_metadata(market: str):
             f"  ·  {int(now_ist.strftime('%I'))}:{now_ist.strftime('%M %p')} IST"
             f"  (Live)"
         )
+    elif market == "GLOBAL":
+        # Mixed timezones — show (Live) only when US market is open, no (Close) label
+        now = datetime.now(ZoneInfo("America/New_York"))
+        if _is_market_open("US"):
+            price_as_of = (
+                f"Price as on {now.strftime('%b')} {now.day}, {now.year}"
+                f"  ·  {int(now.strftime('%I'))}:{now.strftime('%M %p')} ET"
+                f"  (Live)"
+            )
+        else:
+            price_as_of = f"Price as on {now.strftime('%b')} {now.day}, {now.year}"
     elif _is_market_open(market):
         tz_name  = "America/New_York" if market == "US" else "Asia/Kolkata"
         tz_label = "ET" if market == "US" else "IST"
@@ -731,7 +742,7 @@ class GlobalIndicesEngine:
 
         self.sheet_client.batch_update(worksheet, t1_updates + t2_updates)
 
-        price_as_of, updated_at = _make_metadata("US")
+        price_as_of, updated_at = _make_metadata("GLOBAL")
         self.sheet_client.batch_update(worksheet, [
             {"range": "A1", "values": [[price_as_of]]},
             {"range": "A2", "values": [[updated_at]]},
