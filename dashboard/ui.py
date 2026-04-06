@@ -91,7 +91,7 @@ def render_stat_cards(df: pd.DataFrame, secondary_df: pd.DataFrame | None = None
         # Find first two numeric columns (skip text columns like Country)
         numeric_cols = [c for c in src.columns[1:] if src[c].apply(_is_numeric).mean() > 0.5]
         val_col   = numeric_cols[0] if len(numeric_cols) > 0 else (src.columns[1] if len(src.columns) > 1 else None)
-        chg_col   = numeric_cols[1] if len(numeric_cols) > 1 else None
+        chg_col   = numeric_cols[2] if len(numeric_cols) > 2 else (numeric_cols[1] if len(numeric_cols) > 1 else None)
         rows = []
         for _, row in src.head(n).iterrows():
             label  = str(row.iloc[0])
