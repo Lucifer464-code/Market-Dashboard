@@ -261,7 +261,7 @@ elif section == "Additional Global Indices":
 
 elif section == "S&P 500 Sectors":
     df = data.load_sp500_sectors()
-    price_as_of, updated_at = data.load_stocks_metadata("S&P 500 Sectors")
+    price_as_of, updated_at = data.load_stocks_metadata("S&P500 Sectors")
     ui.section_header("S&P 500 Sectors", "S&P 500 sector returns — GICS classification",
                       price_as_of=price_as_of, updated_at=updated_at)
     df = ui.sort_by_keyword(df, "5d")

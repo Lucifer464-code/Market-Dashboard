@@ -1187,7 +1187,7 @@ class SP500SectorsEngine:
     def update_sp500_sectors(self):
         print("Updating S&P 500 Sectors...")
 
-        ws         = self.sheet_client.get_worksheet("S&P 500 Sectors")
+        ws         = self.sheet_client.get_worksheet("S&P500 Sectors")
         symbols    = list(self.SECTORS.values())
         end_date   = datetime.now()
         start_date = end_date - relativedelta(years=4)
@@ -1201,8 +1201,10 @@ class SP500SectorsEngine:
         )
 
         updates = []
-        updates.append({"range": "A3:I3", "values": [["S&P 500 Sectors — GICS"] + [""] * 8]})
-        updates.append({"range": "A4:I4", "values": [["Sector", "Price", "1D%", "5D%", "1M%", "3M%", "6M%", "1Y%", "3Y%"]]})
+        updates.append({
+            "range":  "B3:K3",
+            "values": [["Sector", "Ticker", "Price", "1D", "5D", "1M", "3M", "6M", "1Y", "3Y"]],
+        })
 
         rows = []
         for name, symbol in self.SECTORS.items():
@@ -1215,13 +1217,12 @@ class SP500SectorsEngine:
             except Exception as e:
                 print(f"  [WARN] {name} ({symbol}): {e}")
                 returns = ["NA"] * 8
-            rows.append([name] + ReturnCalculator.clean(returns))
+            rows.append([name, symbol] + ReturnCalculator.clean(returns))
 
-        if rows:
-            # Pad to always clear 11 rows
-            blank = [""] * 9
-            rows += [blank] * (11 - len(rows))
-            updates.append({"range": "A5:I15", "values": rows})
+        # Pad to always clear all 11 rows
+        blank = [""] * 10
+        rows += [blank] * (11 - len(rows))
+        updates.append({"range": "B4:K14", "values": rows})
 
         self.sheet_client.batch_update(ws, updates)
 
@@ -1231,7 +1232,7 @@ class SP500SectorsEngine:
             {"range": "A2", "values": [[updated_at]]},
         ])
 
-        print("S&P 500 Sectors updated OK\n")
+        print("S&P500 Sectors updated OK\n")
 
 
 # ======================================================
