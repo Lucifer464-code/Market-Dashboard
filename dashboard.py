@@ -163,10 +163,10 @@ NAV = {
     "MARKETS": [
         ("Global Indices",                    "Global Indices"),
         ("Additional Global Indices",         "Additional Global Indices"),
-        ("S&P 500 Sectors",                   "S&P 500 Sectors"),
         ("NIFTY Sectoral Indices",            "NIFTY Sectors"),
         ("Additional NIFTY Sectoral Indices", "Additional NIFTY Sector Indices"),
         ("Broad Market Indices",              "Broad Market Indices"),
+        ("S&P 500 Sectors",                   "S&P 500 Sectors"),
     ],
     "FUNDS": [
         ("ETFs US",            "ETFs US"),
