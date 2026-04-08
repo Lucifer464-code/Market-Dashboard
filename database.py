@@ -310,7 +310,6 @@ class YahooDataEngine:
             symbols,
             start       = start_date,
             auto_adjust = True,
-            repair      = True,
             progress    = False,
         )
 
@@ -637,7 +636,6 @@ class GlobalIndicesEngine:
             symbols,
             start       = start_date,
             auto_adjust = True,
-            repair      = True,
             progress    = False,
         )
 
@@ -929,7 +927,6 @@ class ETFdbEngine:
             symbols,
             start       = start_date,
             auto_adjust = True,
-            repair      = True,
             progress    = False,
         )
 
@@ -1210,7 +1207,6 @@ class SP500SectorsEngine:
             symbols,
             start       = start_date,
             auto_adjust = True,
-            repair      = True,
             progress    = False,
         )
 

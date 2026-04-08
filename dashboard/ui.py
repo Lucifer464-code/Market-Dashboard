@@ -88,6 +88,14 @@ def render_stat_cards(df: pd.DataFrame, secondary_df: pd.DataFrame | None = None
         except (ValueError, TypeError):
             return False
 
+    def _fmt_card(val) -> str:
+        s = str(val)
+        try:
+            f = float(s.replace("%", "").replace("+", "").replace(",", "").strip())
+            return f"{f:.2f}"
+        except (ValueError, TypeError):
+            return s
+
     def _get_rows(src: pd.DataFrame, n: int) -> list[tuple]:
         # Find first two numeric columns (skip text columns like Country)
         numeric_cols = [c for c in src.columns[1:] if src[c].apply(_is_numeric).mean() > 0.5]
@@ -96,8 +104,8 @@ def render_stat_cards(df: pd.DataFrame, secondary_df: pd.DataFrame | None = None
         rows = []
         for _, row in src.head(n).iterrows():
             label  = str(row.iloc[0])
-            value  = str(row[val_col]) if val_col else ""
-            change = str(row[chg_col]) if chg_col else None
+            value  = _fmt_card(row[val_col]) if val_col else ""
+            change = _fmt_card(row[chg_col]) if chg_col else None
             rows.append((label, value, change))
         return rows
 
@@ -153,15 +161,27 @@ def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bo
         for i, col in enumerate(df.columns)
     )
 
+    def _fmt(val):
+        """Format numeric values to exactly 2 decimal places; leave others unchanged."""
+        try:
+            s = str(val).replace("%", "").replace("+", "").replace(",", "").strip()
+            if s in ("", "NA", "N/A", "-"):
+                return val
+            f = float(s)
+            return f"{f:.2f}"
+        except (ValueError, TypeError):
+            return val
+
     rows_html = ""
     for _, row in df.iterrows():
         cells = ""
         for j, col in enumerate(df.columns):
             val = row[col]
+            display = _fmt(val) if col in numeric_cols else val
             align = "center" if col in numeric_cols else "left"
             extra = _pct_style(val) if col in pct_cols else ""
             bold = "font-weight:700;" if (j == 0 and bold_first_col) else ""
-            cells += f'<td style="text-align:{align};{bold}{extra}">{val}</td>'
+            cells += f'<td style="text-align:{align};{bold}{extra}">{display}</td>'
         rows_html += f"<tr>{cells}</tr>"
 
     row_count = len(df)
