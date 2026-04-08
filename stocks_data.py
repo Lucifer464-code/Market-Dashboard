@@ -134,7 +134,7 @@ class StocksDataEngine:
 
     # ── Batch settings ────────────────────────────────────────
     PRICE_BATCH_SIZE = 500   # larger batches = fewer round trips
-    MCAP_WORKERS     = 8     # parallel threads for market cap prefetch (too high triggers 401)
+    MCAP_WORKERS     = 12    # parallel threads for market cap prefetch (too high triggers 401)
 
     HEADERS = {
         "User-Agent": (
@@ -315,31 +315,45 @@ class StocksDataEngine:
 
     # ── Market cap prefetch ───────────────────────────────────
 
-    def _fetch_market_caps(self, tickers: list) -> dict:
+    def _fetch_market_caps(self, tickers: list) -> tuple:
         """
-        Fetch market_cap for all tickers in parallel using fast_info.
-        Returns {ticker: market_cap_float} — only tickers with valid caps included.
+        Fetch market_cap and last_price for all tickers in parallel using fast_info.
+        Both values come from the same single fast_info call per ticker, so there is
+        no extra cost vs. fetching market cap alone.
+
+        Returns (mcap_map, live_prices):
+            mcap_map    : {ticker: market_cap_float} — only tickers with valid caps
+            live_prices : {ticker: last_price_float} — used instead of intraday download
         """
         print(f"  Fetching market caps for {len(tickers)} tickers (parallel)...")
 
         def _get(symbol):
             for attempt in range(3):
                 try:
-                    mcap = yf.Ticker(symbol).fast_info.market_cap
-                    return symbol, float(mcap) if mcap else None
+                    fi         = yf.Ticker(symbol).fast_info
+                    mcap       = fi.market_cap
+                    last_price = getattr(fi, "last_price", None)
+                    return (
+                        symbol,
+                        float(mcap)       if mcap       else None,
+                        float(last_price) if last_price else None,
+                    )
                 except Exception:
                     if attempt < 2:
                         time.sleep(1 + attempt)
-            return symbol, None
+            return symbol, None, None
 
-        mcap_map = {}
+        mcap_map    = {}
+        live_prices = {}
         with ThreadPoolExecutor(max_workers=self.MCAP_WORKERS) as pool:
-            for symbol, mcap in pool.map(_get, tickers):
+            for symbol, mcap, last_price in pool.map(_get, tickers):
                 if mcap:
                     mcap_map[symbol] = mcap
+                if last_price:
+                    live_prices[symbol] = last_price
 
         print(f"  Market caps: {len(mcap_map)}/{len(tickers)} tickers resolved")
-        return mcap_map
+        return mcap_map, live_prices
 
     # ── Market hours check ────────────────────────────────────
 
@@ -360,17 +374,17 @@ class StocksDataEngine:
 
     # ── Price history fetch ───────────────────────────────────
 
-    def _fetch_price_history(self, tickers: list, mcap_map: dict, market: str = "US") -> pd.DataFrame:
+    def _fetch_price_history_ath(self, tickers: list, mcap_map: dict, live_prices: dict, market: str = "US") -> tuple:
         """
-        FIX (3Y returning NA): Download 4Y of history instead of 3Y.
-        With period="3y", the oldest available candle sits exactly at the
-        3-year boundary, so looking back 3 years from today finds nothing
-        older than the first candle and returns NaN for every stock.
-        Fetching 4Y guarantees data exists beyond the 3Y lookback window.
+        Download 4Y of daily history for the ATH pipeline.
 
-        Returns DataFrame:
+        live_prices is the dict returned by _fetch_market_caps — used as the
+        current price when the market is open, replacing the old intraday
+        yf.download() call that doubled the number of network requests.
+
+        Returns (df, price_as_of) where df has columns:
             Ticker | MarketCap | Price | ATH | PctFromATH |
-            Change1W | Change1M | Change3M | Change6M | Change1Y | Change3Y
+            Change1D | Change1W | Change1M | Change3M | Change6M | Change1Y | Change3Y
         """
         all_rows    = []
         last_date   = None
@@ -417,32 +431,6 @@ class StocksDataEngine:
                     threads     = True,
                     progress    = False,
                 )
-
-                # Fetch live prices if market is open
-                live_prices = {}
-                if market_open:
-                    try:
-                        intraday = yf.download(
-                            batch,
-                            period   = "1d",
-                            interval = "1m",
-                            group_by = "ticker",
-                            threads  = True,
-                            progress = False,
-                        )
-                        for sym in batch:
-                            try:
-                                col = (
-                                    intraday["Close"] if len(batch) == 1
-                                    else intraday[sym]["Close"]
-                                )
-                                col = col.dropna()
-                                if not col.empty:
-                                    live_prices[sym] = float(col.iloc[-1])
-                            except Exception:
-                                pass
-                    except Exception as e:
-                        print(f"\n  [WARN] Live price fetch failed: {e}")
 
                 for symbol in batch:
                     try:
@@ -537,7 +525,108 @@ class StocksDataEngine:
             else:
                 price_as_of = "Price as on —  (Close)"
 
-        return pd.DataFrame(all_rows), last_date, price_as_of
+        return pd.DataFrame(all_rows), price_as_of
+
+    # ── G&L price history (short pipeline) ───────────────────
+
+    def _fetch_price_history_gl(self, tickers: list, mcap_map: dict, live_prices: dict, market: str = "US") -> tuple:
+        """
+        Download 1 month of daily data — enough for the 1W return needed by G&L.
+        Much faster than the 4Y ATH download: smaller payload per batch,
+        and no ATH calculation.
+
+        Returns (df, price_as_of) where df has columns:
+            Ticker | MarketCap | Price | Change1W
+        """
+        all_rows    = []
+        market_open = self._is_market_open(market)
+        batches     = [
+            tickers[i:i + self.PRICE_BATCH_SIZE]
+            for i in range(0, len(tickers), self.PRICE_BATCH_SIZE)
+        ]
+        total_b = len(batches)
+        print(f"  Fetching G&L price history — {len(tickers)} tickers, {total_b} batches (1mo)...")
+
+        today = pd.Timestamp.now().normalize()
+
+        for batch_idx, batch in enumerate(batches, 1):
+            print(f"  Batch {batch_idx}/{total_b}...", end=" ", flush=True)
+            try:
+                data = yf.download(
+                    batch,
+                    period      = "1mo",
+                    auto_adjust = False,
+                    group_by    = "ticker",
+                    threads     = True,
+                    progress    = False,
+                )
+
+                for symbol in batch:
+                    try:
+                        close = (
+                            data["Close"] if len(batch) == 1
+                            else data[symbol]["Close"]
+                        )
+                        close = close.dropna().sort_index()
+
+                        if len(close) < 6:
+                            continue
+
+                        raw_idx = close.index
+                        if hasattr(raw_idx, "tz") and raw_idx.tz is not None:
+                            idx_naive = raw_idx.tz_localize(None)
+                        else:
+                            idx_naive = raw_idx
+                        s = pd.Series(close.values, index=idx_naive)
+
+                        s_confirmed = s[idx_naive.normalize() < today]
+                        if s_confirmed.empty:
+                            continue
+                        prev_close = float(s_confirmed.iloc[-1])
+
+                        # Use fast_info live price when market is open
+                        price = live_prices.get(symbol, prev_close) if market_open else prev_close
+
+                        change_1w = (
+                            (price / float(s_confirmed.iloc[-6]) - 1) * 100
+                            if len(s_confirmed) >= 6 else np.nan
+                        )
+
+                        mcap = mcap_map.get(symbol)
+                        if not mcap:
+                            continue
+
+                        all_rows.append({
+                            "Ticker":    symbol.replace(".NS", ""),
+                            "MarketCap": float(mcap),
+                            "Price":     price,
+                            "Change1W":  change_1w,
+                        })
+
+                    except Exception:
+                        continue
+
+                print(f"{len(all_rows)} stocks collected")
+
+            except Exception as e:
+                print(f"\n  [WARN] Batch {batch_idx} error: {e}")
+
+        # Build price label
+        if market_open:
+            _tz_name  = "America/New_York" if market == "US" else "Asia/Kolkata"
+            _tz_label = "ET" if market == "US" else "IST"
+            _now      = datetime.now(ZoneInfo(_tz_name))
+            price_as_of = (
+                f"Price as on {_now.strftime('%b')} {_now.day}, {_now.year}"
+                f"  ·  {int(_now.strftime('%I'))}:{_now.strftime('%M %p')} {_tz_label}"
+                f"  (Live)"
+            )
+        else:
+            _tz_name = "America/New_York" if market == "US" else "Asia/Kolkata"
+            _now     = datetime.now(ZoneInfo(_tz_name))
+            price_as_of = f"Price as on {_now.strftime('%b')} {_now.day}, {_now.year}  (Close)"
+
+        return pd.DataFrame(all_rows), price_as_of
 
     # ── Sheets API format request builder ────────────────────
 
@@ -922,25 +1011,25 @@ class StocksDataEngine:
             else:
                 print(f"  US names: all {len(us_tickers)} already up-to-date")
 
-            # Pre-fetch market caps and filter before downloading price history
-            us_mcaps = self._fetch_market_caps(us_tickers)
+            # Fetch market caps + live prices in one pass, then filter universe
+            us_mcaps, us_live = self._fetch_market_caps(us_tickers)
             us_filtered = [t for t in us_tickers if us_mcaps.get(t, 0) >= self.US_MCAP_FLOOR]
             print(f"  Market cap filter: {len(us_filtered)}/{len(us_tickers)} tickers pass ${self.US_MCAP_FLOOR/1e9:.0f}B floor")
 
-            us_df, us_last_date, us_price_label = self._fetch_price_history(us_filtered, us_mcaps, market="US")
-
             if run_gl:
-                us_gainers, us_losers = self._derive_gl(us_df, name_cache, "US")
+                us_gl_df, us_gl_label = self._fetch_price_history_gl(us_filtered, us_mcaps, us_live, market="US")
+                us_gainers, us_losers = self._derive_gl(us_gl_df, name_cache, "US")
                 if not us_gainers.empty:
                     self._write_gl_sheet("Top G&L US", us_gainers, us_losers, "US",
-                                         price_as_of=us_price_label, updated_at=updated_at)
+                                         price_as_of=us_gl_label, updated_at=updated_at)
                 else:
                     print("  [WARN] US G&L: no stocks passed market cap filter.")
 
             if run_ath:
-                us_ath = self._derive_ath(us_df, name_cache, "US")
+                us_ath_df, us_ath_label = self._fetch_price_history_ath(us_filtered, us_mcaps, us_live, market="US")
+                us_ath = self._derive_ath(us_ath_df, name_cache, "US")
                 self._write_ath_sheet("ATH US", us_ath, "US",
-                                      price_as_of=us_price_label, updated_at=updated_at)
+                                      price_as_of=us_ath_label, updated_at=updated_at)
         else:
             print("  [SKIP] US universe unavailable.")
 
@@ -961,25 +1050,25 @@ class StocksDataEngine:
             else:
                 print(f"  India names: all {len(in_tickers)} already up-to-date")
 
-            # Pre-fetch market caps and filter before downloading price history
-            in_mcaps = self._fetch_market_caps(in_tickers)
+            # Fetch market caps + live prices in one pass, then filter universe
+            in_mcaps, in_live = self._fetch_market_caps(in_tickers)
             in_filtered = [t for t in in_tickers if in_mcaps.get(t, 0) >= self.IN_MCAP_FLOOR]
             print(f"  Market cap filter: {len(in_filtered)}/{len(in_tickers)} tickers pass Rs{self.IN_MCAP_FLOOR/1e7:.0f}Cr floor")
 
-            in_df, in_last_date, in_price_label = self._fetch_price_history(in_filtered, in_mcaps, market="IN")
-
             if run_gl:
-                in_gainers, in_losers = self._derive_gl(in_df, name_cache, "IN")
+                in_gl_df, in_gl_label = self._fetch_price_history_gl(in_filtered, in_mcaps, in_live, market="IN")
+                in_gainers, in_losers = self._derive_gl(in_gl_df, name_cache, "IN")
                 if not in_gainers.empty:
                     self._write_gl_sheet("Top G&L India", in_gainers, in_losers, "India",
-                                         price_as_of=in_price_label, updated_at=updated_at)
+                                         price_as_of=in_gl_label, updated_at=updated_at)
                 else:
                     print("  [WARN] India G&L: no stocks passed market cap filter.")
 
             if run_ath:
-                in_ath = self._derive_ath(in_df, name_cache, "IN")
+                in_ath_df, in_ath_label = self._fetch_price_history_ath(in_filtered, in_mcaps, in_live, market="IN")
+                in_ath = self._derive_ath(in_ath_df, name_cache, "IN")
                 self._write_ath_sheet("ATH India", in_ath, "India",
-                                      price_as_of=in_price_label, updated_at=updated_at)
+                                      price_as_of=in_ath_label, updated_at=updated_at)
         else:
             print("  [SKIP] India universe unavailable.")
 
