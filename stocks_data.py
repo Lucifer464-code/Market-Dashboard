@@ -35,6 +35,7 @@ ATH sheet layout ("ATH US" / "ATH India"):
                  Price | 1W% | 1M% | 3M% | 6M% | 1Y% | 3Y%
 """
 
+import logging
 import yfinance as yf
 import gspread
 import pandas as pd
@@ -47,6 +48,9 @@ import io
 import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
+# Suppress noisy yfinance warnings (delisted tickers, no data found, etc.)
+logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from google.oauth2.service_account import Credentials
