@@ -730,8 +730,8 @@ class StocksDataEngine:
                 return f"${v/1e6:.0f}M"
             else:
                 cr = v / 1e7
-                if cr >= 1_00_000: return f"Rs{cr/1_00_000:.2f}L Cr"
-                return f"Rs{cr:,.0f} Cr"
+                if cr >= 1_00_000: return f"{cr/1_00_000:.2f}L"
+                return f"{cr:,.0f}"
         except Exception:
             return str(val)
 
