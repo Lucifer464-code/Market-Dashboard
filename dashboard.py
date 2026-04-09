@@ -15,9 +15,55 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── One-time JS: sidebar cleanup ───────────────────────────
+# ── One-time JS: sidebar cleanup + PWA manifest injection ──
 components.html("""<script>
+// Sidebar cleanup
 Object.keys(localStorage).filter(k => k.includes('sidebar') || k.includes('Sidebar')).forEach(k => localStorage.removeItem(k));
+
+// PWA: inject manifest + meta tags into parent document head
+(function() {
+  var doc = window.parent.document;
+  if (doc.querySelector('link[rel="manifest"]')) return;
+
+  var manifest = {
+    name: "IFPL Market Dashboard",
+    short_name: "IFPL Markets",
+    start_url: "/",
+    display: "standalone",
+    background_color: "#0f172a",
+    theme_color: "#0f172a",
+    icons: [{
+      src: "https://ui-avatars.com/api/?name=IFPL&background=0ea5e9&color=fff&size=192&bold=true&format=png",
+      sizes: "192x192",
+      type: "image/png"
+    }, {
+      src: "https://ui-avatars.com/api/?name=IFPL&background=0ea5e9&color=fff&size=512&bold=true&format=png",
+      sizes: "512x512",
+      type: "image/png"
+    }]
+  };
+
+  var blob = new Blob([JSON.stringify(manifest)], {type: 'application/json'});
+  var link = doc.createElement('link');
+  link.rel = 'manifest';
+  link.href = URL.createObjectURL(blob);
+  doc.head.appendChild(link);
+
+  // Mobile meta tags
+  var metas = [
+    {name: 'mobile-web-app-capable', content: 'yes'},
+    {name: 'apple-mobile-web-app-capable', content: 'yes'},
+    {name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent'},
+    {name: 'apple-mobile-web-app-title', content: 'IFPL Markets'},
+    {name: 'theme-color', content: '#0f172a'}
+  ];
+  metas.forEach(function(m) {
+    var tag = doc.createElement('meta');
+    tag.name = m.name;
+    tag.content = m.content;
+    doc.head.appendChild(tag);
+  });
+})();
 </script>""", height=0)
 
 # ── Logo (base64) ───────────────────────────────────────────
@@ -96,6 +142,13 @@ st.markdown(
     border: 1px solid #e2e8f0 !important;
     border-radius: 10px !important;
     overflow: hidden !important;
+}
+
+/* ── PWA standalone: remove extra top padding (no browser bar) ── */
+@media all and (display-mode: standalone) {
+    section[data-testid="stMain"] > div:first-child {
+        padding-top: 0 !important;
+    }
 }
 
 /* ── Collapse zero-height component wrappers ── */
