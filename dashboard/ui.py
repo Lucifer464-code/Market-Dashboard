@@ -10,7 +10,7 @@ GREEN = "#34a853"
 RED   = "#ea4335"
 
 _NAV_GROUPS = {
-    "MARKETS": ["Global Indices", "Additional Global Indices", "S&P 500 Sectors", "NIFTY Sectors", "Additional NIFTY Sector Indices", "Broad Market Indices"],
+    "MARKETS": ["Global Indices", "Additional Global Indices", "NIFTY Sectoral Indices", "Additional NIFTY Sectoral Indices", "Broad Market Indices", "S&P 500 Sectors"],
     "FUNDS":   ["ETFs US", "Leveraged Funds", "ETFs India", "Mutual Funds India"],
     "CRYPTO":  ["Crypto"],
     "STOCKS":  ["Gainers & Losers US", "Gainers & Losers India", "ATH US", "ATH India"],
