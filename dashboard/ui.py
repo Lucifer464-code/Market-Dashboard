@@ -129,7 +129,11 @@ def render_stat_cards(df: pd.DataFrame, secondary_df: pd.DataFrame | None = None
   margin-bottom: 16px;
 }}
 @media (max-width: 768px) {{
-  .ifpl-stat-grid {{ grid-template-columns: repeat(2, 1fr); }}
+  .ifpl-stat-grid {{ grid-template-columns: repeat(2, 1fr); gap: 6px; }}
+  .ifpl-stat-grid > div {{ padding: 10px 12px !important; }}
+  .ifpl-stat-grid > div > div:first-child {{ font-size: 9px !important; margin-bottom: 4px !important; }}
+  .ifpl-stat-grid > div > div:nth-child(2) {{ font-size: 16px !important; }}
+  .ifpl-stat-grid > div > div:nth-child(3) {{ font-size: 10px !important; }}
 }}
 </style>
 <div class="ifpl-stat-grid">{cards_html}</div>
@@ -189,7 +193,7 @@ def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bo
 
     html = f"""
 <!DOCTYPE html><html><head><style>
-  body {{ margin:0; font-family:sans-serif; font-size:13px; }}
+  body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; font-size:13px; }}
   table {{ width:100%; border-collapse:collapse; }}
   thead th {{
     background:#0f172a; color:white; text-align:center;
@@ -210,7 +214,14 @@ def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bo
   th:first-child {{ position:sticky; left:0; z-index:2; }}
   .scroll-wrap {{ overflow:auto; max-height:{frame_height}px;
                   max-width:100%; box-sizing:border-box;
-                  border:1px solid #e2e8f0; border-radius:8px; }}
+                  border:1px solid #e2e8f0; border-radius:8px;
+                  -webkit-overflow-scrolling:touch; }}
+  @media (max-width: 768px) {{
+    body {{ font-size:11px; }}
+    thead th {{ padding:7px 8px; font-size:11px; }}
+    td {{ padding:6px 8px; font-size:11px; }}
+    .sort-icon {{ margin-left:3px; font-size:9px; }}
+  }}
 </style></head><body>
 <div class="scroll-wrap">
   <table id="t">
@@ -264,14 +275,27 @@ def section_header(title: str, subtitle: str = "", price_as_of: str = "", update
     )
     sub_html = f"<div style='font-size:12px;color:#94a3b8;margin-top:2px'>{subtitle}</div>" if subtitle else ""
     st.markdown(
-        f"<div style='padding:14px 0;border-bottom:1px solid #e2e8f0;margin-bottom:16px;overflow:hidden'>"
-        f"<div style='float:right;text-align:right'>"
-        f"<span style='font-size:12px;color:#64748b;font-weight:500'>{top_right}</span>"
-        f"{updated_html}"
-        f"</div>"
-        f"<div style='font-size:18px;font-weight:700;color:#0f172a'>{title}</div>"
-        f"{sub_html}"
-        f"</div>",
+        f"""<style>
+.ifpl-hdr {{ padding:14px 0;border-bottom:1px solid #e2e8f0;margin-bottom:16px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px; }}
+.ifpl-hdr-right {{ text-align:right;flex-shrink:0; }}
+@media (max-width: 768px) {{
+  .ifpl-hdr {{ flex-direction:column;gap:4px; }}
+  .ifpl-hdr-right {{ text-align:left; }}
+  .ifpl-hdr-title {{ font-size:16px !important; }}
+  .ifpl-hdr-sub {{ font-size:11px !important; }}
+  .ifpl-hdr-price {{ font-size:11px !important; }}
+}}
+</style>
+<div class="ifpl-hdr">
+  <div>
+    <div class="ifpl-hdr-title" style="font-size:18px;font-weight:700;color:#0f172a">{title}</div>
+    {f'<div class="ifpl-hdr-sub" style="font-size:12px;color:#94a3b8;margin-top:2px">{subtitle}</div>' if subtitle else ''}
+  </div>
+  <div class="ifpl-hdr-right">
+    <span class="ifpl-hdr-price" style="font-size:12px;color:#64748b;font-weight:500">{top_right}</span>
+    {updated_html}
+  </div>
+</div>""",
         unsafe_allow_html=True,
     )
 
@@ -367,7 +391,7 @@ function mnToggle() {{
     for (var j = 0; j < NAV[i].sections.length; j++) {{
       var sec    = NAV[i].sections[j];
       var active = sec === CURRENT ? 'background:#f0f9ff;color:#0ea5e9;border-left-color:#0ea5e9;font-weight:600;' : '';
-      html += '<div data-sec="' + sec.replace(/"/g,'&quot;') + '" style="padding:9px 16px;font-size:13px;color:#334155;cursor:pointer;border-left:3px solid transparent;' + active + '">' + sec + '</div>';
+      html += '<div data-sec="' + sec.replace(/"/g,'&quot;') + '" style="padding:12px 16px;font-size:14px;color:#334155;cursor:pointer;border-left:3px solid transparent;' + active + '">' + sec + '</div>';
     }}
   }}
 

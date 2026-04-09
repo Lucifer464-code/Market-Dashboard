@@ -55,7 +55,8 @@ Object.keys(localStorage).filter(k => k.includes('sidebar') || k.includes('Sideb
     {name: 'apple-mobile-web-app-capable', content: 'yes'},
     {name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent'},
     {name: 'apple-mobile-web-app-title', content: 'IFPL Markets'},
-    {name: 'theme-color', content: '#0f172a'}
+    {name: 'theme-color', content: '#0f172a'},
+    {name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover'}
   ];
   metas.forEach(function(m) {
     var tag = doc.createElement('meta');
@@ -144,11 +145,15 @@ st.markdown(
     overflow: hidden !important;
 }
 
-/* ── PWA standalone: remove extra top padding (no browser bar) ── */
+/* ── PWA standalone: safe area insets for notch/home indicator ── */
 @media all and (display-mode: standalone) {
     section[data-testid="stMain"] > div:first-child {
         padding-top: 0 !important;
     }
+    .ifpl-mobile-header {
+        padding-top: calc(10px + env(safe-area-inset-top)) !important;
+    }
+    body { padding-bottom: env(safe-area-inset-bottom); }
 }
 
 /* ── Collapse zero-height component wrappers ── */
@@ -165,8 +170,8 @@ st.markdown(
         overflow: hidden !important;
     }
     section[data-testid="stMain"] > div:first-child {
-        padding-left: 1rem !important;
-        padding-right: 1rem !important;
+        padding-left: 10px !important;
+        padding-right: 10px !important;
         padding-top: 56px !important;
     }
     .ifpl-section-header {
@@ -175,6 +180,11 @@ st.markdown(
     .ifpl-mobile-header {
         display: flex !important;
     }
+    /* Tighter block spacing */
+    [data-testid="stVerticalBlock"] > div { gap: 0.5rem !important; }
+    /* Let iframes fill width without overflow */
+    [data-testid="stCustomComponentV1"] { max-width: 100vw !important; }
+    iframe { max-width: 100% !important; }
 }
 .ifpl-mobile-header {
     display: none;
