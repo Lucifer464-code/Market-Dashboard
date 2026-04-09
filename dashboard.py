@@ -186,7 +186,6 @@ NAV = {
 }
 
 with st.sidebar:
-    _last_updated = data.load_last_updated() or "—"
     st.markdown(
         f"""
         <div style="display:flex;align-items:center;gap:10px;padding:20px 16px 12px;
@@ -239,7 +238,7 @@ if section == "Global Indices":
     t1, _ = data.load_global_indices()
     price_as_of, _ = data.load_stocks_metadata("Global Indices")
     ui.section_header("Global Indices", "Major market indices worldwide",
-                      price_as_of=price_as_of, updated_at=_last_updated)
+                      price_as_of=price_as_of)
     t1 = ui.sort_by_keyword(t1, "5d")
     ui.render_stat_cards(t1)
     ui.render_table(t1, bold_first_col=False)
@@ -248,7 +247,7 @@ elif section == "Additional Global Indices":
     _, t2 = data.load_global_indices()
     price_as_of, _ = data.load_stocks_metadata("Global Indices")
     ui.section_header("Additional Global Indices", "More market indices worldwide",
-                      price_as_of=price_as_of, updated_at=_last_updated)
+                      price_as_of=price_as_of)
     if not t2.empty:
         t2 = ui.sort_by_keyword(t2, "5d")
         ui.render_stat_cards(t2)
@@ -258,7 +257,7 @@ elif section == "S&P 500 Sectors":
     df = data.load_sp500_sectors()
     price_as_of, _ = data.load_stocks_metadata("S&P500 Sectors")
     ui.section_header("S&P 500 Sectors", "S&P 500 sector returns — GICS classification",
-                      price_as_of=price_as_of, updated_at=_last_updated)
+                      price_as_of=price_as_of)
     df = df.drop(df.columns[1], axis=1)
     df = ui.sort_by_keyword(df, "5d")
     ui.render_stat_cards(df)
@@ -268,7 +267,7 @@ elif section == "Additional NIFTY Sector Indices":
     t1, _ = data.load_nifty_indices()
     price_as_of, _ = data.load_stocks_metadata("NIFTY Indices")
     ui.section_header("Additional NIFTY Sector Indices", "NSE India sector index returns",
-                      price_as_of=price_as_of, updated_at=_last_updated)
+                      price_as_of=price_as_of)
     t1 = t1.drop(t1.columns[1], axis=1)
     t1 = ui.sort_by_keyword(t1, "5d")
     ui.render_stat_cards(t1)
@@ -278,7 +277,7 @@ elif section == "Broad Market Indices":
     _, t2 = data.load_nifty_indices()
     price_as_of, _ = data.load_stocks_metadata("NIFTY Indices")
     ui.section_header("Broad Market Indices", "NSE India broad market index returns",
-                      price_as_of=price_as_of, updated_at=_last_updated)
+                      price_as_of=price_as_of)
     if not t2.empty:
         t2 = t2.drop(t2.columns[1], axis=1)
         t2 = ui.sort_by_keyword(t2, "5d")
@@ -289,7 +288,7 @@ elif section == "NIFTY Sectors":
     df = data.load_nifty_sectors()
     price_as_of, _ = data.load_stocks_metadata("NIFTY Sectors")
     ui.section_header("NIFTY Sectors", "Sector-wise returns — India",
-                      price_as_of=price_as_of, updated_at=_last_updated)
+                      price_as_of=price_as_of)
     df = df.drop(df.columns[1], axis=1)
     df = ui.sort_by_keyword(df, "5d")
     ui.render_stat_cards(df)
@@ -299,7 +298,7 @@ elif section == "ETFs US":
     df = data.load_etfs_us()
     price_as_of, _ = data.load_stocks_metadata("ETFs US")
     ui.section_header("ETFs US", "Top US ETFs by AUM",
-                      price_as_of=price_as_of, updated_at=_last_updated)
+                      price_as_of=price_as_of)
     df = df.drop(df.columns[2], axis=1)
     ui.render_table(df, height=620)
 
@@ -307,7 +306,7 @@ elif section == "Leveraged Funds":
     df = data.load_leveraged_funds()
     price_as_of, _ = data.load_stocks_metadata("Biggest Leveraged Funds ")
     ui.section_header("Leveraged Funds", "Biggest leveraged ETFs",
-                      price_as_of=price_as_of, updated_at=_last_updated)
+                      price_as_of=price_as_of)
     df = df.drop(df.columns[3], axis=1)
     ui.render_table(df)
 
@@ -315,7 +314,7 @@ elif section == "ETFs India":
     df = data.load_etfs_india()
     price_as_of, _ = data.load_stocks_metadata("ETFs India")
     ui.section_header("ETFs India", "Indian exchange-listed ETFs",
-                      price_as_of=price_as_of, updated_at=_last_updated)
+                      price_as_of=price_as_of)
     df = df.drop(df.columns[1], axis=1)
     ui.render_table(df, bold_first_col=False)
 
@@ -323,14 +322,14 @@ elif section == "Crypto":
     df = data.load_crypto()
     price_as_of, _ = data.load_stocks_metadata("Crypto")
     ui.section_header("Crypto", "Top cryptocurrencies by market cap",
-                      price_as_of=price_as_of, updated_at=_last_updated)
+                      price_as_of=price_as_of)
     ui.render_table(df)
 
 elif section == "Mutual Funds India":
     df = data.load_mutual_funds()
     price_as_of, _ = data.load_stocks_metadata("Mutual Funds India")
     ui.section_header("Mutual Funds India", "NAV and returns",
-                      price_as_of=price_as_of, updated_at=_last_updated)
+                      price_as_of=price_as_of)
     ui.render_table(df, height=620, bold_first_col=False)
 
 elif section == "Gainers & Losers US":
@@ -340,7 +339,6 @@ elif section == "Gainers & Losers US":
         "Gainers & Losers — US",
         "Top 15 weekly gainers and losers · Russell 3000 ($2B+ market cap)",
         price_as_of=price_as_of,
-        updated_at=updated_at,
     )
     col1, col2 = st.columns(2)
     with col1:
@@ -357,7 +355,6 @@ elif section == "Gainers & Losers India":
         "Gainers & Losers — India",
         "Top 15 weekly gainers and losers · NIFTY 500 (Rs1000Cr+ market cap)",
         price_as_of=price_as_of,
-        updated_at=updated_at,
     )
     col1, col2 = st.columns(2)
     with col1:
@@ -374,7 +371,6 @@ elif section == "ATH US":
         "All-Time High — US",
         "Stocks within 5% of all-time high · sorted by 1W%",
         price_as_of=price_as_of,
-        updated_at=updated_at,
     )
     ui.render_table(df, height=620)
 
@@ -385,6 +381,5 @@ elif section == "ATH India":
         "All-Time High — India",
         "Stocks within 5% of all-time high · sorted by 1W%",
         price_as_of=price_as_of,
-        updated_at=updated_at,
     )
     ui.render_table(df, height=620)
