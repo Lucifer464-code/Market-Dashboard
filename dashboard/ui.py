@@ -259,7 +259,7 @@ def section_header(title: str, subtitle: str = "", price_as_of: str = "", update
         yesterday  = datetime.now() - timedelta(days=1)
         top_right  = f"Price as on {yesterday.strftime('%b')} {yesterday.day}, {yesterday.year}"
     updated_html = (
-        f"<div style='font-size:10px;color:#94a3b8;margin-top:2px;text-align:right'>{updated_at}</div>"
+        f"<div style='font-size:10px;color:#94a3b8;margin-top:2px;text-align:right'>Updated {updated_at}</div>"
         if updated_at else ""
     )
     sub_html = f"<div style='font-size:12px;color:#94a3b8;margin-top:2px'>{subtitle}</div>" if subtitle else ""

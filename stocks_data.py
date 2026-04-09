@@ -112,7 +112,7 @@ class StocksDataEngine:
     """
 
     TOP_N         = 15
-    ATH_THRESHOLD = 0.01    # within 1% of all-time high
+    ATH_THRESHOLD = 0.05    # within 5% of all-time high
 
     # ── Data sources ──────────────────────────────────────────
     RUSSELL_3000_URL = (
@@ -734,7 +734,7 @@ class StocksDataEngine:
                 return f"${v/1e6:.0f}M"
             else:
                 cr = v / 1e7
-                if cr >= 1_00_000: return f"{cr/1_00_000:.2f}L"
+                if cr >= 1_00_000: return f"{cr/1_00_000:.0f}L"
                 return f"{cr:,.0f}"
         except Exception:
             return str(val)
@@ -951,7 +951,7 @@ class StocksDataEngine:
             updates.append({"range": "A4:M4", "values": col_hdr})
             updates.append({"range": f"A5:M{4 + 50}", "values": [empty] * 50})
         else:
-            updates.append({"range": "A3:M3", "values": [[f"Stocks within 1% of All-Time High — sorted by 1W%"] + [""] * (ncols - 1)]})
+            updates.append({"range": "A3:M3", "values": [[f"Stocks within 5% of All-Time High — sorted by 1W%"] + [""] * (ncols - 1)]})
             updates.append({"range": "A4:M4", "values": col_hdr})
             # Data rows start at row 5 + 50 trailing clear rows
             all_rows = df.reset_index(drop=True).values.tolist() + [empty] * 50
