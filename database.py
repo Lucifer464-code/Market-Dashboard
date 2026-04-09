@@ -338,6 +338,11 @@ class YahooDataEngine:
 
         self.sheet_client.batch_update(worksheet, updates)
 
+        # Sort by 5D performance (descending)
+        five_d_col = start_col_index + 3  # 1-based column of 5D return
+        end_data_row = start_row + len(tickers) - 1
+        worksheet.sort((five_d_col, 'des'), range=f"A{start_row}:{end_col_letter}{end_data_row}")
+
         price_as_of, updated_at = _make_metadata(market)
         self.sheet_client.batch_update(worksheet, [
             {"range": "A1", "values": [[price_as_of]]},
@@ -470,6 +475,10 @@ class ZerodhaDataEngine:
 
         self.sheet_client.batch_update(worksheet, updates)
 
+        # Sort each table section by 5D performance (col F = 6, descending)
+        worksheet.sort((6, 'des'), range="A4:K17")
+        worksheet.sort((6, 'des'), range="A21:K27")
+
         price_as_of, updated_at = _make_metadata("IN")
         self.sheet_client.batch_update(worksheet, [
             {"range": "A1", "values": [[price_as_of]]},
@@ -515,6 +524,9 @@ class ZerodhaDataEngine:
                 })
 
         self.sheet_client.batch_update(worksheet, updates)
+
+        # Sort by 5D performance (col F = 6, descending)
+        worksheet.sort((6, 'des'), range="A4:K17")
 
         price_as_of, updated_at = _make_metadata("IN")
         self.sheet_client.batch_update(worksheet, [
@@ -740,6 +752,10 @@ class GlobalIndicesEngine:
 
         self.sheet_client.batch_update(worksheet, t1_updates + t2_updates)
 
+        # Sort each table by 5D performance (col F = 6, descending)
+        worksheet.sort((6, 'des'), range="A5:L17")
+        worksheet.sort((6, 'des'), range="A23:L80")
+
         price_as_of, updated_at = _make_metadata("GLOBAL")
         self.sheet_client.batch_update(worksheet, [
             {"range": "A1", "values": [[price_as_of]]},
@@ -953,6 +969,11 @@ class ETFdbEngine:
 
         self.sheet_client.batch_update(ws, price_updates)
 
+        # Sort by 5D performance (descending)
+        five_d_col = ord(rc) - ord('A') + 3  # 1-based column of 5D return
+        end_data_row = start_row + len(etfs) - 1
+        ws.sort((five_d_col, 'des'), range=f"A{start_row}:{end_col_letter}{end_data_row}")
+
         price_as_of, updated_at = _make_metadata("US")
         self.sheet_client.batch_update(ws, [
             {"range": "A1", "values": [[price_as_of]]},
@@ -1138,6 +1159,11 @@ class MutualFundsEngine:
 
         self.sheet_client.batch_update(worksheet, updates)
 
+        # Sort by 1M performance (col C = 3, descending)
+        last_row = 3 + len(fund_rows) - 1
+        if len(fund_rows) > 1:
+            worksheet.sort((3, 'des'), range=f"A3:G{last_row}")
+
         price_as_of, updated_at = _make_metadata("NAV")
         self.sheet_client.batch_update(worksheet, [
             {"range": "A1", "values": [[price_as_of]]},
@@ -1227,6 +1253,9 @@ class SP500SectorsEngine:
             })
 
         self.sheet_client.batch_update(ws, updates)
+
+        # Sort by 5D performance (col F = 6, descending)
+        ws.sort((6, 'des'), range="A4:K14")
 
         price_as_of, updated_at = _make_metadata("US")
         self.sheet_client.batch_update(ws, [
