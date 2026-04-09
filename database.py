@@ -338,10 +338,11 @@ class YahooDataEngine:
 
         self.sheet_client.batch_update(worksheet, updates)
 
-        # Sort by 5D performance (descending)
-        five_d_col = start_col_index + 3  # 1-based column of 5D return
-        end_data_row = start_row + len(tickers) - 1
-        worksheet.sort((five_d_col, 'des'), range=f"A{start_row}:{end_col_letter}{end_data_row}")
+        # Sort by 5D performance (descending) — skip for some sheets
+        if sheet_name not in ("ETFs India",):
+            five_d_col = start_col_index + 3  # 1-based column of 5D return
+            end_data_row = start_row + len(tickers) - 1
+            worksheet.sort((five_d_col, 'des'), range=f"A{start_row}:{end_col_letter}{end_data_row}")
 
         price_as_of, updated_at = _make_metadata(market)
         self.sheet_client.batch_update(worksheet, [
@@ -818,6 +819,7 @@ class ETFdbEngine:
             "name_col":    "B",
             "aum_col":     "C",
             "returns_col": "G",   # unchanged from existing layout
+            "no_sort":     True,
         },
         "ETFs US": {
             "etfdb_type":  None,   # no type filter = all ETFs sorted by AUM
@@ -969,10 +971,11 @@ class ETFdbEngine:
 
         self.sheet_client.batch_update(ws, price_updates)
 
-        # Sort by 5D performance (descending)
-        five_d_col = ord(rc) - ord('A') + 3  # 1-based column of 5D return
-        end_data_row = start_row + len(etfs) - 1
-        ws.sort((five_d_col, 'des'), range=f"A{start_row}:{end_col_letter}{end_data_row}")
+        # Sort by 5D performance (descending) unless disabled
+        if not cfg.get("no_sort"):
+            five_d_col = ord(rc) - ord('A') + 3  # 1-based column of 5D return
+            end_data_row = start_row + len(etfs) - 1
+            ws.sort((five_d_col, 'des'), range=f"A{start_row}:{end_col_letter}{end_data_row}")
 
         price_as_of, updated_at = _make_metadata("US")
         self.sheet_client.batch_update(ws, [
