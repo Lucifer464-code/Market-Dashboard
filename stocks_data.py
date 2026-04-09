@@ -973,23 +973,35 @@ class StocksDataEngine:
         ]
         self.sheet_client.apply_formats(ws, fmt_reqs)
 
-        # ── Re-pin BasicFilter at row 4 (headers) ────────────
-        # Writing data causes Google Sheets to auto-shift the table/filter
-        # range to row 5. Re-apply the filter anchored at row 4.
+        # ── Re-pin Table + BandedRange at row 4 (headers) ─────
+        # Writing data causes Google Sheets to auto-shift the table range
+        # to row 5. Fetch current IDs and update ranges back to row 4.
         data_rows = len(df) if not df.empty else 0
         end_row_idx = 4 + max(data_rows, 1)   # 0-based exclusive
-        self.sheet_client.apply_formats(ws, [
-            {"clearBasicFilter": {"sheetId": sid}},
-        ])
-        self.sheet_client.apply_formats(ws, [
-            {"setBasicFilter": {"filter": {"range": {
-                "sheetId":          sid,
-                "startRowIndex":    3,           # 0-based row 4
-                "endRowIndex":      end_row_idx,
-                "startColumnIndex": 0,
-                "endColumnIndex":   ncols,       # cols A-M
-            }}}},
-        ])
+        correct_range = {
+            "sheetId":          sid,
+            "startRowIndex":    3,           # 0-based row 4 (headers)
+            "endRowIndex":      end_row_idx,
+            "startColumnIndex": 0,
+            "endColumnIndex":   ncols,
+        }
+        meta = ws.spreadsheet.fetch_sheet_metadata()
+        for sheet in meta["sheets"]:
+            if sheet["properties"]["sheetId"] != sid:
+                continue
+            reqs = []
+            for tbl in sheet.get("tables", []):
+                reqs.append({"updateTable": {
+                    "table": {"tableId": tbl["tableId"], "range": correct_range},
+                    "fields": "range",
+                }})
+            for br in sheet.get("bandedRanges", []):
+                reqs.append({"updateBandedRange": {
+                    "bandedRange": {"bandedRangeId": br["bandedRangeId"], "range": correct_range},
+                    "fields": "range",
+                }})
+            if reqs:
+                self.sheet_client.apply_formats(ws, reqs)
 
         # ── Per-cell text colour for % columns ────────────────
         # ATH%=col4, 1D%=col6, 1W%=col7, 1M%=col8, 3M%=col9, 6M%=col10, 1Y%=col11, 3Y%=col12
