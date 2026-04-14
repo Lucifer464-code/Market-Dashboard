@@ -467,8 +467,12 @@ class StocksDataEngine:
                         if last_date is None or confirmed_date > last_date:
                             last_date = confirmed_date
 
-                        # Display price: live when market is open, else last trading day
-                        if market_open and symbol in live_prices:
+                        # Check if yfinance has a candle for today — this is the
+                        # only reliable signal that the market is actually open
+                        # (handles holidays, half-days, etc. unlike _is_market_open)
+                        has_today = bool((idx_naive.normalize() == today).any())
+
+                        if has_today and symbol in live_prices:
                             price     = live_prices[symbol]
                             change_1d = (price / last_td_close - 1) * 100 if last_td_close else np.nan
                         else:
