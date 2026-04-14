@@ -973,9 +973,11 @@ class StocksDataEngine:
         ]
         self.sheet_client.apply_formats(ws, fmt_reqs)
 
-        # ── Re-pin Table + BandedRange at row 4 (headers) ─────
-        # Writing data causes Google Sheets to auto-shift the table range
-        # to row 5. Fetch current IDs and update ranges back to row 4.
+        # ── Re-pin banding at row 4 (headers) ─────────────────
+        # Google Sheets Tables auto-shift their range when data is written.
+        # Tables own their banded ranges so we can't update them independently.
+        # Fix: delete any Table (frees the banding), delete orphan banded ranges,
+        # then re-create a plain banded range pinned at row 4.
         data_rows = len(df) if not df.empty else 0
         end_row_idx = 4 + max(data_rows, 1)   # 0-based exclusive
         correct_range = {
@@ -985,23 +987,31 @@ class StocksDataEngine:
             "startColumnIndex": 0,
             "endColumnIndex":   ncols,
         }
-        meta = ws.spreadsheet.fetch_sheet_metadata()
-        for sheet in meta["sheets"]:
-            if sheet["properties"]["sheetId"] != sid:
-                continue
-            reqs = []
-            for tbl in sheet.get("tables", []):
-                reqs.append({"updateTable": {
-                    "table": {"tableId": tbl["tableId"], "range": correct_range},
-                    "fields": "range",
-                }})
-            for br in sheet.get("bandedRanges", []):
-                reqs.append({"updateBandedRange": {
-                    "bandedRange": {"bandedRangeId": br["bandedRangeId"], "range": correct_range},
-                    "fields": "range",
-                }})
-            if reqs:
-                self.sheet_client.apply_formats(ws, reqs)
+        try:
+            meta = ws.spreadsheet.fetch_sheet_metadata()
+            for sheet in meta["sheets"]:
+                if sheet["properties"]["sheetId"] != sid:
+                    continue
+                # Step 1: delete Tables (they own the banded ranges)
+                del_reqs = []
+                for tbl in sheet.get("tables", []):
+                    del_reqs.append({"deleteTable": {"tableId": tbl["tableId"]}})
+                for br in sheet.get("bandedRanges", []):
+                    del_reqs.append({"deleteBandedRange": {"bandedRangeId": br["bandedRangeId"]}})
+                if del_reqs:
+                    self.sheet_client.apply_formats(ws, del_reqs)
+                # Step 2: re-create plain banded range at correct position
+                self.sheet_client.apply_formats(ws, [{"addBandedRange": {"bandedRange": {
+                    "range": correct_range,
+                    "rowProperties": {
+                        "headerColorStyle":    {"rgbColor": {"red": 0.259, "green": 0.522, "blue": 0.957}},
+                        "firstBandColorStyle": {"rgbColor": {"red": 1, "green": 1, "blue": 1}},
+                        "secondBandColorStyle": {"rgbColor": {"red": 0.867, "green": 0.867, "blue": 0.867}},
+                    },
+                }}}])
+                break
+        except Exception as e:
+            print(f"  [WARN] Could not re-pin banding on '{sheet_name}': {e}")
 
         # ── Per-cell text colour for % columns ────────────────
         # ATH%=col4, 1D%=col6, 1W%=col7, 1M%=col8, 3M%=col9, 6M%=col10, 1Y%=col11, 3Y%=col12
