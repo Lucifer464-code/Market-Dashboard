@@ -464,8 +464,8 @@ class StocksDataEngine:
                         if last_date is None or confirmed_date > last_date:
                             last_date = confirmed_date
 
-                        # Use live price when market is open and data is available
-                        if symbol in live_prices:
+                        # Use live price only when market is actually open
+                        if market_open and symbol in live_prices:
                             price     = live_prices[symbol]
                             change_1d = (price / prev_close - 1) * 100 if prev_close != 0 else np.nan
                         else:
