@@ -455,25 +455,25 @@ class StocksDataEngine:
                             idx_naive = raw_idx
                         s = pd.Series(close.values, index=idx_naive)
 
-                        # Last confirmed close (yesterday or earlier)
+                        # s_confirmed = all closes before today (only trading days
+                        # — yfinance never returns weekends/holidays).
+                        # iloc[-1] = last trading day, iloc[-2] = the one before.
                         s_confirmed = s[idx_naive.normalize() < today]
-                        if s_confirmed.empty:
+                        if len(s_confirmed) < 2:
                             continue
-                        prev_close     = float(s_confirmed.iloc[-1])
+                        last_td_close  = float(s_confirmed.iloc[-1])   # e.g. Friday
+                        prev_td_close  = float(s_confirmed.iloc[-2])   # e.g. Thursday
                         confirmed_date = s_confirmed.index[-1]
                         if last_date is None or confirmed_date > last_date:
                             last_date = confirmed_date
 
-                        # Use live price only when market is actually open
+                        # Display price: live when market is open, else last trading day
                         if market_open and symbol in live_prices:
                             price     = live_prices[symbol]
-                            change_1d = (price / prev_close - 1) * 100 if prev_close != 0 else np.nan
+                            change_1d = (price / last_td_close - 1) * 100 if last_td_close else np.nan
                         else:
-                            price     = prev_close
-                            change_1d = (
-                                (price / float(s_confirmed.iloc[-2]) - 1) * 100
-                                if len(s_confirmed) >= 2 else np.nan
-                            )
+                            price     = last_td_close
+                            change_1d = (last_td_close / prev_td_close - 1) * 100 if prev_td_close else np.nan
 
                         # ATH: extend to live price in case of intraday new high
                         ath          = max(float(s.max()), price)
