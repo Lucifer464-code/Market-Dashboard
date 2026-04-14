@@ -359,8 +359,9 @@ class YahooDataEngine:
 
 class ZerodhaDataEngine:
 
-    CACHE_FILE   = "nse_instruments.pkl"
-    KITE_WORKERS = 8   # parallel historical_data calls
+    CACHE_FILE      = "nse_instruments.pkl"
+    CACHE_TTL_HOURS = 24
+    KITE_WORKERS    = 8   # parallel historical_data calls
 
     def __init__(self, config: Config, sheet_client: GoogleSheetClient):
         self.config       = config
@@ -377,8 +378,11 @@ class ZerodhaDataEngine:
     def _load_instrument_cache(self):
 
         if os.path.exists(self.CACHE_FILE):
-            with open(self.CACHE_FILE, "rb") as f:
-                return pickle.load(f)
+            age_hours = (time.time() - os.path.getmtime(self.CACHE_FILE)) / 3600
+            if age_hours < self.CACHE_TTL_HOURS:
+                with open(self.CACHE_FILE, "rb") as f:
+                    return pickle.load(f)
+            print(f"  Instrument cache expired ({age_hours:.0f}h old), refreshing...")
 
         instruments = self.kite.instruments("NSE")
 
@@ -403,10 +407,12 @@ class ZerodhaDataEngine:
         """
         token = self.index_token_map.get(ticker)
         if not token:
+            print(f"  [WARN] {ticker}: not found in instrument cache")
             return ["NA"] * 8
         try:
             candles = self.kite.historical_data(token, start_date, end_date, "day")
             if not candles:
+                print(f"  [WARN] {ticker}: Kite returned empty candles (token={token})")
                 return ["NA"] * 8
             df = pd.DataFrame(candles)
             df["date"] = pd.to_datetime(df["date"])
@@ -427,7 +433,8 @@ class ZerodhaDataEngine:
                     pass   # fall back to last historical close
 
             return ReturnCalculator.calculate(close_series, current_price, open_series)
-        except Exception:
+        except Exception as e:
+            print(f"  [WARN] {ticker}: {type(e).__name__}: {e}")
             return ["NA"] * 8
 
     def get_returns(self, zerodha_ticker: str) -> list:
