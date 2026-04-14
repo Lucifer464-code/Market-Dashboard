@@ -339,7 +339,7 @@ class YahooDataEngine:
         self.sheet_client.batch_update(worksheet, updates)
 
         # Sort by 5D performance (descending) — skip for some sheets
-        if sheet_name not in ("ETFs India",):
+        if sheet_name not in ("ETFs India", "Crypto"):
             five_d_col = start_col_index + 3  # 1-based column of 5D return
             end_data_row = start_row + len(tickers) - 1
             worksheet.sort((five_d_col, 'des'), range=f"A{start_row}:{end_col_letter}{end_data_row}")
