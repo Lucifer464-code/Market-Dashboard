@@ -125,7 +125,7 @@ def load_global_indices():
 def load_nifty_indices():
     ws = _ws("NIFTY Indices")
     t1 = _range_to_df(ws, "B3:K17")
-    t2 = _range_to_df(ws, "B20:K27")
+    t2 = _range_to_df(ws, "B20:K28")
     return t1, t2
 
 

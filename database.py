@@ -448,7 +448,7 @@ class ZerodhaDataEngine:
         print("Updating NSE Indices...")
 
         worksheet  = self.sheet_client.get_worksheet("NIFTY Indices")
-        ranges     = [("C4:C17", 4), ("C21:C27", 21)]
+        ranges     = [("C4:C17", 4), ("C21:C28", 21)]
         index_rows = []
 
         for cell_range, start_row in ranges:
@@ -485,7 +485,7 @@ class ZerodhaDataEngine:
 
         # Sort each table section by 5D performance (col F = 6, descending)
         worksheet.sort((6, 'des'), range="A4:K17")
-        worksheet.sort((6, 'des'), range="A21:K27")
+        worksheet.sort((6, 'des'), range="A21:K28")
 
         price_as_of, updated_at = _make_metadata("IN")
         self.sheet_client.batch_update(worksheet, [
