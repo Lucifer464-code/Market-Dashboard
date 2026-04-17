@@ -230,6 +230,8 @@ NAV = {
         ("Additional NIFTY Sectoral Indices", "Additional NIFTY Sector Indices"),
         ("Broad Market Indices",              "Broad Market Indices"),
         ("NIFTY 500 Momentum 50",             "NIFTY 500 Momentum 50"),
+        ("NIFTY500 Sectors",                  "NIFTY500 Sectors"),
+        ("NIFTY Momentum Sectors",            "NIFTY Momentum Sectors"),
         ("S&P 500 Sectors",                   "S&P 500 Sectors"),
     ],
     "FUNDS": [
@@ -352,6 +354,22 @@ elif section == "NIFTY 500 Momentum 50":
     df = data.load_nifty_momentum_50()
     price_as_of, _ = data.load_stocks_metadata("NIFTY500Moment.50")
     ui.section_header("NIFTY 500 Momentum 50", "Top 10 momentum stocks — NSE",
+                      price_as_of=price_as_of)
+    if not df.empty:
+        ui.render_table(df, bold_first_col=False)
+
+elif section == "NIFTY500 Sectors":
+    df = data.load_nifty500_sectors()
+    price_as_of, _ = data.load_stocks_metadata("NIFTY500Moment.50")
+    ui.section_header("NIFTY500 Sectors", "Sector composition of the NIFTY 500",
+                      price_as_of=price_as_of)
+    if not df.empty:
+        ui.render_table(df, bold_first_col=False, height=620)
+
+elif section == "NIFTY Momentum Sectors":
+    df = data.load_nifty_momentum_sectors()
+    price_as_of, _ = data.load_stocks_metadata("NIFTY500Moment.50")
+    ui.section_header("NIFTY Momentum Sectors", "Sector composition of the NIFTY 500 Momentum 50",
                       price_as_of=price_as_of)
     if not df.empty:
         ui.render_table(df, bold_first_col=False)

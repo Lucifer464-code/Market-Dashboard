@@ -142,6 +142,18 @@ def load_nifty_momentum_50():
 
 
 @st.cache_data(ttl=28800)
+def load_nifty500_sectors():
+    ws = _ws("NIFTY500Moment.50")
+    return _range_to_df(ws, "B17:E54")
+
+
+@st.cache_data(ttl=28800)
+def load_nifty_momentum_sectors():
+    ws = _ws("NIFTY500Moment.50")
+    return _range_to_df(ws, "H17:K34")
+
+
+@st.cache_data(ttl=28800)
 def load_etfs_us():
     ws = _ws("ETFs US")
     return _range_to_df(ws, "B2:M210")
