@@ -359,15 +359,26 @@ elif section == "NIFTY 500 Momentum 50":
     sectors_500    = data.load_nifty500_sectors()
     sectors_moment = data.load_nifty_momentum_sectors()
 
+    _SIDE_TABLE_HEIGHT = 600
+    _title_style = (
+        "font-size:15px;font-weight:600;margin:16px 0 8px;"
+        "height:22px;line-height:22px;white-space:nowrap;"
+        "overflow:hidden;text-overflow:ellipsis;"
+    )
+
     col_left, col_right = st.columns(2)
     with col_left:
-        st.markdown("#### NIFTY 500 Sectors")
+        st.markdown(f"<div style='{_title_style}'>NIFTY 500 Sectors</div>",
+                    unsafe_allow_html=True)
         if not sectors_500.empty:
-            ui.render_table(sectors_500.iloc[:, [0, 2]], bold_first_col=False, height=620)
+            ui.render_table(sectors_500.iloc[:, [0, 2]], bold_first_col=False,
+                            height=_SIDE_TABLE_HEIGHT)
     with col_right:
-        st.markdown("#### NIFTY Momentum Sectors")
+        st.markdown(f"<div style='{_title_style}'>NIFTY Momentum Sectors</div>",
+                    unsafe_allow_html=True)
         if not sectors_moment.empty:
-            ui.render_table(sectors_moment.iloc[:, [0, 2]], bold_first_col=False, height=620)
+            ui.render_table(sectors_moment.iloc[:, [0, 2]], bold_first_col=False,
+                            height=_SIDE_TABLE_HEIGHT)
 
 elif section == "NIFTY Sectors":
     df = data.load_nifty_sectors()
