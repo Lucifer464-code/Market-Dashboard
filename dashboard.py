@@ -359,7 +359,8 @@ elif section == "NIFTY 500 Momentum 50":
     sectors_500    = data.load_nifty500_sectors()
     sectors_moment = data.load_nifty_momentum_sectors()
 
-    _SIDE_TABLE_HEIGHT = 600
+    # 42px header + 10 rows * 37px + 20px padding = 432 (render_table auto-calc formula)
+    _SIDE_TABLE_HEIGHT = 432
     _title_style = (
         "font-size:15px;font-weight:600;margin:16px 0 8px;"
         "height:22px;line-height:22px;white-space:nowrap;"
