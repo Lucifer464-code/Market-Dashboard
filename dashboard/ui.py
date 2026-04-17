@@ -140,7 +140,8 @@ def render_stat_cards(df: pd.DataFrame, secondary_df: pd.DataFrame | None = None
 """, unsafe_allow_html=True)
 
 
-def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bool = True):
+def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bool = True,
+                 fixed_height: bool = False):
     """Render a sortable HTML table with red centered headers."""
     if df.empty:
         st.info("No data available.")
@@ -212,7 +213,7 @@ def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bo
   tbody tr:nth-child(even) td:first-child {{ background:#ffffff; }}
   tr:hover td:first-child {{ background:#f1f5f9 !important; }}
   th:first-child {{ position:sticky; left:0; z-index:2; }}
-  .scroll-wrap {{ overflow:auto; max-height:{frame_height}px;
+  .scroll-wrap {{ overflow:auto; {"height" if fixed_height else "max-height"}:{frame_height}px;
                   max-width:100%; box-sizing:border-box;
                   border:1px solid #e2e8f0; border-radius:8px;
                   -webkit-overflow-scrolling:touch; }}
