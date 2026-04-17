@@ -229,6 +229,7 @@ NAV = {
         ("NIFTY Sectoral Indices",            "NIFTY Sectors"),
         ("Additional NIFTY Sectoral Indices", "Additional NIFTY Sector Indices"),
         ("Broad Market Indices",              "Broad Market Indices"),
+        ("NIFTY 500 Momentum 50",             "NIFTY 500 Momentum 50"),
         ("S&P 500 Sectors",                   "S&P 500 Sectors"),
     ],
     "FUNDS": [
@@ -346,6 +347,14 @@ elif section == "Broad Market Indices":
         t2 = ui.sort_by_keyword(t2, "5d")
         ui.render_stat_cards(t2)
         ui.render_table(t2, bold_first_col=False)
+
+elif section == "NIFTY 500 Momentum 50":
+    df = data.load_nifty_momentum_50()
+    price_as_of, _ = data.load_stocks_metadata("NIFTY500Moment.50")
+    ui.section_header("NIFTY 500 Momentum 50", "Top 10 momentum stocks — NSE",
+                      price_as_of=price_as_of)
+    if not df.empty:
+        ui.render_table(df, bold_first_col=False)
 
 elif section == "NIFTY Sectors":
     df = data.load_nifty_sectors()

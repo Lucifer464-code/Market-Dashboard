@@ -3,6 +3,8 @@ import gspread
 import pandas as pd
 import numpy as np
 import os
+import csv
+import re
 import pickle
 import requests
 import difflib
@@ -351,6 +353,133 @@ class YahooDataEngine:
         ])
 
         print(f"{sheet_name} updated OK\n")
+
+    # ── NIFTY 500 Momentum 50 ────────────────────────────────
+
+    def update_nifty_momentum_50(self):
+        """
+        Fetch NIFTY 500 Momentum 50 stock returns.
+
+        Reads company names from B3:B12 (populated via IMPORTHTML), reverse-
+        looks-up NSE tickers from ticker_names.csv in-memory, then fetches
+        returns via yfinance (.NS suffix) and writes to D3:K12.
+
+        Row order is preserved as the NSE-provided momentum ranking (no sort).
+        Column C is left untouched (IMPORTHTML owns it).
+        """
+        sheet_name = "NIFTY500Moment.50"
+        print(f"Updating {sheet_name}...")
+
+        worksheet = self.sheet_client.get_worksheet(sheet_name)
+        name_rows = worksheet.get("B3:B12")
+
+        name_to_ticker = self._load_name_to_ticker()
+
+        resolved = []  # [(sheet_row, ticker)]
+        for i in range(10):
+            name   = name_rows[i][0].strip() if i < len(name_rows) and name_rows[i] else ""
+            ticker = self._resolve_indian_ticker(name, name_to_ticker) if name else ""
+            resolved.append((3 + i, ticker))
+            if name and not ticker:
+                print(f"  [WARN] No ticker match for '{name}'")
+
+        # Prepare return values (NA placeholder for unresolved rows)
+        dk_values = {row: ["NA"] * 8 for row, _ in resolved}
+
+        tickers_with_rows = [(t + ".NS", r) for r, t in resolved if t]
+
+        if tickers_with_rows:
+            symbols = [t[0] for t in tickers_with_rows]
+
+            end_date   = datetime.now()
+            start_date = end_date - relativedelta(years=4)
+
+            data = yf.download(
+                symbols,
+                start       = start_date,
+                auto_adjust = True,
+                progress    = False,
+            )
+
+            for symbol, sheet_row in tickers_with_rows:
+                try:
+                    close_series = _extract_close(data, symbol, symbols)
+                    if close_series is None or close_series.empty:
+                        raise ValueError(f"no data for {symbol}")
+                    current_price = ReturnCalculator.last_confirmed_close(close_series)
+                    returns       = ReturnCalculator.calculate(close_series, current_price)
+                    dk_values[sheet_row] = ReturnCalculator.clean(returns)
+                except Exception as e:
+                    print(f"  [WARN] {symbol} price fetch failed: {e}")
+
+        updates = [
+            {"range": f"D{row}:K{row}", "values": [vals]}
+            for row, vals in dk_values.items()
+        ]
+        self.sheet_client.batch_update(worksheet, updates)
+
+        price_as_of, updated_at = _make_metadata("IN")
+        self.sheet_client.batch_update(worksheet, [
+            {"range": "A1", "values": [[price_as_of]]},
+            {"range": "A2", "values": [[updated_at]]},
+        ])
+
+        print(f"{sheet_name} updated OK\n")
+
+    def _load_name_to_ticker(self) -> dict:
+        """Build reverse lookup: normalized company name -> NSE ticker.
+        Cached on first call for reuse within a single run."""
+        if hasattr(self, "_name_to_ticker_cache"):
+            return self._name_to_ticker_cache
+
+        mapping = {}
+        try:
+            with open("ticker_names.csv", "r", encoding="utf-8") as f:
+                for row in csv.DictReader(f):
+                    ticker = (row.get("Ticker") or "").strip()
+                    name   = (row.get("Name")   or "").strip()
+                    if ticker and name:
+                        key = self._normalize_name(name)
+                        # First write wins — Indian tickers are listed first in the CSV
+                        if key and key not in mapping:
+                            mapping[key] = ticker
+        except FileNotFoundError:
+            print("  [WARN] ticker_names.csv not found; ticker lookup will fail")
+
+        self._name_to_ticker_cache = mapping
+        return mapping
+
+    @staticmethod
+    def _normalize_name(name: str) -> str:
+        """Lowercase, strip corporate suffixes and punctuation for fuzzy matching."""
+        s = name.lower().strip()
+        for suffix in (" limited", " ltd.", " ltd",
+                       " corporation", " corp.", " corp",
+                       " incorporated", " inc.", " inc",
+                       " company", " co.", " plc"):
+            if s.endswith(suffix):
+                s = s[: -len(suffix)].strip()
+                break
+        s = re.sub(r"[^\w\s]", "", s)
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
+
+    def _resolve_indian_ticker(self, name: str, mapping: dict) -> str:
+        if not name:
+            return ""
+        key = self._normalize_name(name)
+        if key in mapping:
+            return mapping[key]
+        # Fallback: unambiguous word-prefix match for short names
+        # (e.g. "Hindalco" -> "Hindalco Industries Ltd.")
+        prefix  = key + " "
+        matches = [(k, t) for k, t in mapping.items() if k.startswith(prefix)]
+        if len(matches) == 1:
+            print(f"  [INFO] Resolved '{name}' -> {matches[0][1]} (prefix match: '{matches[0][0]}')")
+            return matches[0][1]
+        if len(matches) > 1:
+            print(f"  [WARN] Ambiguous prefix for '{name}' ({len(matches)} candidates)")
+        return ""
 
 
 # ======================================================
@@ -1323,6 +1452,7 @@ class MarketUpdater:
             "Mutual Funds":                 self.mutual_funds.update_mutual_funds,
             "NIFTY Sectors":                self.zerodha.update_nifty_sectors,
             "NIFTY Indices":                self.zerodha.update_nifty_indices,
+            "NIFTY500Moment.50":            self.yahoo.update_nifty_momentum_50,
             **{
                 name: (lambda n, c: lambda: self.etfdb._update_sheet(n, c))(name, cfg)
                 for name, cfg in ETFdbEngine.SHEET_CONFIGS.items()
@@ -1359,11 +1489,12 @@ class MarketUpdater:
             multiple yf.download() calls run concurrently.
             """
             for name, fn in [
-                ("ETFs India",      lambda: self.yahoo.update_sheet("ETFs India", "C7:C100", 7, "E")),
-                ("Crypto",          lambda: self.yahoo.update_sheet("Crypto", "B104:B118", 104, "D")),
-                ("Global Indices",  self.global_indices.update_global_indices),
-                ("S&P500 Sectors",  self.sp500_sectors.update_sp500_sectors),
-                ("ETFdb Sheets",    self.etfdb.update_all),
+                ("ETFs India",         lambda: self.yahoo.update_sheet("ETFs India", "C7:C100", 7, "E")),
+                ("Crypto",             lambda: self.yahoo.update_sheet("Crypto", "B104:B118", 104, "D")),
+                ("Global Indices",     self.global_indices.update_global_indices),
+                ("S&P500 Sectors",     self.sp500_sectors.update_sp500_sectors),
+                ("ETFdb Sheets",       self.etfdb.update_all),
+                ("NIFTY500Moment.50",  self.yahoo.update_nifty_momentum_50),
             ]:
                 try:
                     fn()
