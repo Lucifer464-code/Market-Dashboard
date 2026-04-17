@@ -1028,7 +1028,8 @@ class StocksDataEngine:
 
     # ── Public entry point ────────────────────────────────────
 
-    def run(self, run_gl: bool = True, run_ath: bool = True):
+    def run(self, run_gl: bool = True, run_ath: bool = True,
+             run_us: bool = True, run_in: bool = True):
         print("\n===== STOCKS DATA UPDATE =====\n")
 
         # Compute "updated at" timestamp once for this run (IST)
@@ -1044,80 +1045,86 @@ class StocksDataEngine:
         print(f"Name cache: {len(name_cache)} tickers already known\n")
 
         # ── US ────────────────────────────────────────────────
-        print("--- US (Russell 3000) ---")
-        us_tickers, us_name_map = self._fetch_russell3000()
-
-        if us_tickers:
-            # Always overwrite from iShares CSV — authoritative source,
-            # ensures any bad ticker=ticker entries get corrected immediately
-            updated = sum(1 for t, n in us_name_map.items() if name_cache.get(t) != n)
-            name_cache.update(us_name_map)
-            if updated:
-                self._save_name_cache(name_cache)
-                print(f"  Seeded/updated {updated} US names from iShares CSV")
-            else:
-                print(f"  US names: all {len(us_tickers)} already up-to-date")
-
-            # Fetch market caps + live prices in one pass, then filter universe
-            us_mcaps, us_live = self._fetch_market_caps(us_tickers)
-            us_filtered = [t for t in us_tickers if us_mcaps.get(t, 0) >= self.US_MCAP_FLOOR]
-            print(f"  Market cap filter: {len(us_filtered)}/{len(us_tickers)} tickers pass ${self.US_MCAP_FLOOR/1e9:.0f}B floor")
-
-            if run_gl:
-                us_gl_df, us_gl_label = self._fetch_price_history_gl(us_filtered, us_mcaps, us_live, market="US")
-                us_gainers, us_losers = self._derive_gl(us_gl_df, name_cache, "US")
-                if not us_gainers.empty:
-                    self._write_gl_sheet("Top G&L US", us_gainers, us_losers, "US",
-                                         price_as_of=us_gl_label, updated_at=updated_at)
-                else:
-                    print("  [WARN] US G&L: no stocks passed market cap filter.")
-
-            if run_ath:
-                us_ath_df, us_ath_label = self._fetch_price_history_ath(us_filtered, us_mcaps, us_live, market="US")
-                us_ath = self._derive_ath(us_ath_df, name_cache, "US")
-                self._write_ath_sheet("ATH US", us_ath, "US",
-                                      price_as_of=us_ath_label, updated_at=updated_at)
+        if not run_us:
+            print("--- US: skipped ---\n")
         else:
-            print("  [SKIP] US universe unavailable.")
+            print("--- US (Russell 3000) ---")
+            us_tickers, us_name_map = self._fetch_russell3000()
 
-        print()
+            if us_tickers:
+                # Always overwrite from iShares CSV — authoritative source,
+                # ensures any bad ticker=ticker entries get corrected immediately
+                updated = sum(1 for t, n in us_name_map.items() if name_cache.get(t) != n)
+                name_cache.update(us_name_map)
+                if updated:
+                    self._save_name_cache(name_cache)
+                    print(f"  Seeded/updated {updated} US names from iShares CSV")
+                else:
+                    print(f"  US names: all {len(us_tickers)} already up-to-date")
+
+                # Fetch market caps + live prices in one pass, then filter universe
+                us_mcaps, us_live = self._fetch_market_caps(us_tickers)
+                us_filtered = [t for t in us_tickers if us_mcaps.get(t, 0) >= self.US_MCAP_FLOOR]
+                print(f"  Market cap filter: {len(us_filtered)}/{len(us_tickers)} tickers pass ${self.US_MCAP_FLOOR/1e9:.0f}B floor")
+
+                if run_gl:
+                    us_gl_df, us_gl_label = self._fetch_price_history_gl(us_filtered, us_mcaps, us_live, market="US")
+                    us_gainers, us_losers = self._derive_gl(us_gl_df, name_cache, "US")
+                    if not us_gainers.empty:
+                        self._write_gl_sheet("Top G&L US", us_gainers, us_losers, "US",
+                                             price_as_of=us_gl_label, updated_at=updated_at)
+                    else:
+                        print("  [WARN] US G&L: no stocks passed market cap filter.")
+
+                if run_ath:
+                    us_ath_df, us_ath_label = self._fetch_price_history_ath(us_filtered, us_mcaps, us_live, market="US")
+                    us_ath = self._derive_ath(us_ath_df, name_cache, "US")
+                    self._write_ath_sheet("ATH US", us_ath, "US",
+                                          price_as_of=us_ath_label, updated_at=updated_at)
+            else:
+                print("  [SKIP] US universe unavailable.")
+
+            print()
 
         # ── India ─────────────────────────────────────────────
-        print("--- India (NIFTY Total Market) ---")
-        in_tickers, in_name_map = self._fetch_nifty_total_market()
-
-        if in_tickers:
-            # Always overwrite from NSE CSV — authoritative source,
-            # ensures any bad ticker=ticker entries get corrected immediately
-            updated = sum(1 for t, n in in_name_map.items() if name_cache.get(t) != n)
-            name_cache.update(in_name_map)
-            if updated:
-                self._save_name_cache(name_cache)
-                print(f"  Seeded/updated {updated} India names from NSE CSV")
-            else:
-                print(f"  India names: all {len(in_tickers)} already up-to-date")
-
-            # Fetch market caps + live prices in one pass, then filter universe
-            in_mcaps, in_live = self._fetch_market_caps(in_tickers)
-            in_filtered = [t for t in in_tickers if in_mcaps.get(t, 0) >= self.IN_MCAP_FLOOR]
-            print(f"  Market cap filter: {len(in_filtered)}/{len(in_tickers)} tickers pass Rs{self.IN_MCAP_FLOOR/1e7:.0f}Cr floor")
-
-            if run_gl:
-                in_gl_df, in_gl_label = self._fetch_price_history_gl(in_filtered, in_mcaps, in_live, market="IN")
-                in_gainers, in_losers = self._derive_gl(in_gl_df, name_cache, "IN")
-                if not in_gainers.empty:
-                    self._write_gl_sheet("Top G&L India", in_gainers, in_losers, "India",
-                                         price_as_of=in_gl_label, updated_at=updated_at)
-                else:
-                    print("  [WARN] India G&L: no stocks passed market cap filter.")
-
-            if run_ath:
-                in_ath_df, in_ath_label = self._fetch_price_history_ath(in_filtered, in_mcaps, in_live, market="IN")
-                in_ath = self._derive_ath(in_ath_df, name_cache, "IN")
-                self._write_ath_sheet("ATH India", in_ath, "India",
-                                      price_as_of=in_ath_label, updated_at=updated_at)
+        if not run_in:
+            print("--- India: skipped ---\n")
         else:
-            print("  [SKIP] India universe unavailable.")
+            print("--- India (NIFTY Total Market) ---")
+            in_tickers, in_name_map = self._fetch_nifty_total_market()
+
+            if in_tickers:
+                # Always overwrite from NSE CSV — authoritative source,
+                # ensures any bad ticker=ticker entries get corrected immediately
+                updated = sum(1 for t, n in in_name_map.items() if name_cache.get(t) != n)
+                name_cache.update(in_name_map)
+                if updated:
+                    self._save_name_cache(name_cache)
+                    print(f"  Seeded/updated {updated} India names from NSE CSV")
+                else:
+                    print(f"  India names: all {len(in_tickers)} already up-to-date")
+
+                # Fetch market caps + live prices in one pass, then filter universe
+                in_mcaps, in_live = self._fetch_market_caps(in_tickers)
+                in_filtered = [t for t in in_tickers if in_mcaps.get(t, 0) >= self.IN_MCAP_FLOOR]
+                print(f"  Market cap filter: {len(in_filtered)}/{len(in_tickers)} tickers pass Rs{self.IN_MCAP_FLOOR/1e7:.0f}Cr floor")
+
+                if run_gl:
+                    in_gl_df, in_gl_label = self._fetch_price_history_gl(in_filtered, in_mcaps, in_live, market="IN")
+                    in_gainers, in_losers = self._derive_gl(in_gl_df, name_cache, "IN")
+                    if not in_gainers.empty:
+                        self._write_gl_sheet("Top G&L India", in_gainers, in_losers, "India",
+                                             price_as_of=in_gl_label, updated_at=updated_at)
+                    else:
+                        print("  [WARN] India G&L: no stocks passed market cap filter.")
+
+                if run_ath:
+                    in_ath_df, in_ath_label = self._fetch_price_history_ath(in_filtered, in_mcaps, in_live, market="IN")
+                    in_ath = self._derive_ath(in_ath_df, name_cache, "IN")
+                    self._write_ath_sheet("ATH India", in_ath, "India",
+                                          price_as_of=in_ath_label, updated_at=updated_at)
+            else:
+                print("  [SKIP] India universe unavailable.")
 
         print("\n===== STOCKS DATA UPDATE COMPLETE =====")
 
@@ -1127,17 +1134,24 @@ class StocksDataEngine:
 
 if __name__ == "__main__":
 
-    # python stocks_data.py                # full run (G&L + ATH)
-    # python stocks_data.py --gl-only      # gainers/losers only
-    # python stocks_data.py --ath-only     # ATH only
+    # python stocks_data.py                    # full run (G&L + ATH, US + India)
+    # python stocks_data.py --gl-only          # gainers/losers only
+    # python stocks_data.py --ath-only         # ATH only
+    # python stocks_data.py --india-only       # India only (G&L + ATH)
+    # python stocks_data.py --us-only          # US only (G&L + ATH)
+    # Combine freely: --india-only --ath-only  # India ATH only
 
-    gl_only  = "--gl-only"  in sys.argv
-    ath_only = "--ath-only" in sys.argv
+    gl_only    = "--gl-only"    in sys.argv
+    ath_only   = "--ath-only"   in sys.argv
+    india_only = "--india-only" in sys.argv
+    us_only    = "--us-only"    in sys.argv
 
     run_gl  = not ath_only
     run_ath = not gl_only
+    run_us  = not india_only
+    run_in  = not us_only
 
     config       = Config()
     sheet_client = GoogleSheetClient(config)
     engine       = StocksDataEngine(sheet_client)
-    engine.run(run_gl=run_gl, run_ath=run_ath)
+    engine.run(run_gl=run_gl, run_ath=run_ath, run_us=run_us, run_in=run_in)
