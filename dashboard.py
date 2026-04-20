@@ -351,7 +351,7 @@ elif section == "Broad Market Indices":
 elif section == "NIFTY 500 Momentum 50":
     df = data.load_nifty_momentum_50()
     price_as_of, _ = data.load_stocks_metadata("NIFTY500Moment.50")
-    ui.section_header("NIFTY 500 Momentum 50", "Top 10 momentum stocks — NSE",
+    ui.section_header("NIFTY 500 Momentum 50", "50 momentum stocks — NSE",
                       price_as_of=price_as_of)
     if not df.empty:
         ui.render_table(df, bold_first_col=False)

@@ -138,19 +138,19 @@ def load_nifty_sectors():
 @st.cache_data(ttl=28800)
 def load_nifty_momentum_50():
     ws = _ws("NIFTY500Moment.50")
-    return _range_to_df(ws, "B2:K12")
+    return _range_to_df(ws, "B4:L54")
 
 
 @st.cache_data(ttl=28800)
 def load_nifty500_sectors():
     ws = _ws("NIFTY500Moment.50")
-    return _range_to_df(ws, "B17:E54")
+    return _range_to_df(ws, "B66:E103")
 
 
 @st.cache_data(ttl=28800)
 def load_nifty_momentum_sectors():
     ws = _ws("NIFTY500Moment.50")
-    return _range_to_df(ws, "H17:K34")
+    return _range_to_df(ws, "H66:K83")
 
 
 @st.cache_data(ttl=28800)
