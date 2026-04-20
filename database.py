@@ -499,12 +499,29 @@ class YahooDataEngine:
         s = re.sub(r"\s+", " ", s).strip()
         return s
 
+    # NSE IMPORTHTML uses heavy abbreviations ("Pharma", "Intl", "Finl",
+    # "Exch" etc.) that don't match ticker_names.csv full names. Explicit
+    # overrides cover the known cases. Keys must match _normalize_name output.
+    _NIFTY_NAME_OVERRIDES = {
+        "narayana hrudayalay":  "NH",
+        "navin fluorine intl":  "NAVINFLUOR",
+        "mah mah finl serv":    "M&MFIN",
+        "au small fin bank":    "AUBANK",
+        "glenmark pharma":      "GLENMARK",
+        "one97 communications": "PAYTM",
+        "chola invest fin":     "CHOLAFIN",
+        "gmdc":                 "GMDCLTD",
+        "multi commodity exch": "MCX",
+    }
+
     def _resolve_indian_ticker(self, name: str, mapping: dict) -> str:
         if not name:
             return ""
         key = self._normalize_name(name)
         if key in mapping:
             return mapping[key]
+        if key in self._NIFTY_NAME_OVERRIDES:
+            return self._NIFTY_NAME_OVERRIDES[key]
         # Fallback: unambiguous word-prefix match for short names
         # (e.g. "Hindalco" -> "Hindalco Industries Ltd.")
         prefix  = key + " "
