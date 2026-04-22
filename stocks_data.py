@@ -429,7 +429,7 @@ class StocksDataEngine:
             try:
                 data = yf.download(
                     batch,
-                    period      = "4y",     # FIX: was "3y" — must exceed 3Y lookback
+                    period      = "max",
                     auto_adjust = False,
                     group_by    = "ticker",
                     threads     = True,
@@ -938,7 +938,6 @@ class StocksDataEngine:
         ws      = self.sheet_client.get_worksheet(sheet_name)
         updates = []
         ncols   = 13   # A–M
-        empty   = [""] * ncols
 
         col_hdr = [[
             "Ticker", "Name", "Market Cap", "ATH", "ATH %",
@@ -949,16 +948,17 @@ class StocksDataEngine:
         updates.append({"range": "A1", "values": [[price_as_of]]})
         updates.append({"range": "A2", "values": [[updated_at]]})
 
+        # Wipe any stale rows from previous runs before writing
+        ws.batch_clear(["A5:M200"])
+
         if df.empty:
             updates.append({"range": "A3:M3", "values": [["No stocks currently at all-time high"] + [""] * (ncols - 1)]})
             updates.append({"range": "A4:M4", "values": col_hdr})
-            updates.append({"range": f"A5:M{4 + 50}", "values": [empty] * 50})
         else:
             updates.append({"range": "A3:M3", "values": [[f"Stocks within 5% of All-Time High — sorted by 1W%"] + [""] * (ncols - 1)]})
             updates.append({"range": "A4:M4", "values": col_hdr})
-            # Data rows start at row 5 + 50 trailing clear rows
-            all_rows = df.reset_index(drop=True).values.tolist() + [empty] * 50
-            updates.append({"range": f"A5:M{4 + len(all_rows)}", "values": all_rows})
+            data_rows = df.reset_index(drop=True).values.tolist()
+            updates.append({"range": f"A5:M{4 + len(data_rows)}", "values": data_rows})
 
         self.sheet_client.batch_update(ws, updates)
 
@@ -1000,11 +1000,11 @@ class StocksDataEngine:
                 for tbl in sheet.get("tables", []):
                     del_reqs.append({"deleteTable": {"tableId": tbl["tableId"]}})
                 for br in sheet.get("bandedRanges", []):
-                    del_reqs.append({"deleteBandedRange": {"bandedRangeId": br["bandedRangeId"]}})
+                    del_reqs.append({"deleteBanding": {"bandedRangeId": br["bandedRangeId"]}})
                 if del_reqs:
                     self.sheet_client.apply_formats(ws, del_reqs)
                 # Step 2: re-create plain banded range at correct position
-                self.sheet_client.apply_formats(ws, [{"addBandedRange": {"bandedRange": {
+                self.sheet_client.apply_formats(ws, [{"addBanding": {"bandedRange": {
                     "range": correct_range,
                     "rowProperties": {
                         "headerColorStyle":    {"rgbColor": {"red": 0.259, "green": 0.522, "blue": 0.957}},
