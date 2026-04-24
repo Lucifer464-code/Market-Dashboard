@@ -14,6 +14,7 @@ _NAV_GROUPS = {
     "FUNDS":   ["ETFs US", "Leveraged Funds", "ETFs India", "Mutual Funds India"],
     "CRYPTO":  ["Crypto"],
     "STOCKS":  ["Gainers & Losers US", "Gainers & Losers India", "ATH US", "ATH India"],
+    "INSTITUTIONAL INVESTORS": ["Hedge Funds", "Top Hedge Fund Investments", "Indian Investors"],
 }
 
 
@@ -141,7 +142,7 @@ def render_stat_cards(df: pd.DataFrame, secondary_df: pd.DataFrame | None = None
 
 
 def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bool = True,
-                 fixed_height: bool = False):
+                 fixed_height: bool = False, cell_color_map: dict | None = None):
     """Render a sortable HTML table with red centered headers."""
     if df.empty:
         st.info("No data available.")
@@ -177,6 +178,8 @@ def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bo
         except (ValueError, TypeError):
             return val
 
+    color_map = cell_color_map or {}
+
     rows_html = ""
     for _, row in df.iterrows():
         cells = ""
@@ -185,6 +188,10 @@ def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bo
             display = _fmt(val) if col in numeric_cols else val
             align = "center" if col in numeric_cols else "left"
             extra = _pct_style(val) if col in pct_cols else ""
+            if col in color_map:
+                mapped = color_map[col].get(str(val).strip())
+                if mapped:
+                    extra = f"color:{mapped};font-weight:600;"
             bold = "font-weight:700;" if (j == 0 and bold_first_col) else ""
             cells += f'<td style="text-align:{align};{bold}{extra}">{display}</td>'
         rows_html += f"<tr>{cells}</tr>"

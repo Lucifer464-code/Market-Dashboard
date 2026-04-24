@@ -130,6 +130,16 @@ st.markdown(
     width: 100%;
 }
 
+/* Force inner label container to left-align (Streamlit centers the inner p by default) */
+[data-testid="stSidebar"] button > div,
+[data-testid="stSidebar"] button [data-testid="stMarkdownContainer"],
+[data-testid="stSidebar"] button p {
+    text-align: left !important;
+    justify-content: flex-start !important;
+    margin-left: 0 !important;
+    width: 100%;
+}
+
 /* Dividers */
 [data-testid="stSidebar"] hr { border-color: #1e293b; }
 
@@ -246,6 +256,11 @@ NAV = {
         ("Gainers & Losers India", "Gainers & Losers India"),
         ("ATH US",                 "ATH US"),
         ("ATH India",              "ATH India"),
+    ],
+    "INSTITUTIONAL INVESTORS": [
+        ("Hedge Funds",                 "Hedge Funds"),
+        ("Top Hedge Fund Investments",  "Top Hedge Fund Investments"),
+        ("Indian Investors",            "Indian Investors"),
     ],
 }
 
@@ -482,3 +497,50 @@ elif section == "ATH India":
         price_as_of=price_as_of,
     )
     ui.render_table(df, height=620)
+
+elif section == "Indian Investors":
+    df = data.load_investor_holdings()
+    ui.section_header(
+        "Indian Institutional Investors",
+        "Quarterly 1%+ holdings and changes",
+    )
+    if df.empty:
+        st.info("No data available.")
+    else:
+        investors = sorted(df["Investor"].dropna().unique())
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            selected = st.selectbox("Investor", ["All investors"] + investors)
+        with col2:
+            change_sel = st.selectbox(
+                "Change type",
+                ["All", "Increase", "Decrease", "New Entry", "Exit / Changed", "No Change"],
+            )
+
+        view = df if selected == "All investors" else df[df["Investor"] == selected]
+        if change_sel != "All":
+            view = view[view["Change"] == change_sel]
+
+        if selected != "All investors":
+            view = view.drop(columns=["Investor"])
+
+        st.caption(f"{len(view)} position{'s' if len(view) != 1 else ''}")
+        change_colors = {
+            "Change": {
+                "Increase":       ui.GREEN,
+                "New Entry":      ui.GREEN,
+                "Decrease":       ui.RED,
+                "Exit / Changed": ui.RED,
+            }
+        }
+        ui.render_table(view, height=620, bold_first_col=False, cell_color_map=change_colors)
+
+elif section == "Hedge Funds":
+    df = data.load_hedge_funds()
+    ui.section_header("Hedge Funds", "Top hedge funds overview")
+    ui.render_table(df, bold_first_col=False)
+
+elif section == "Top Hedge Fund Investments":
+    df = data.load_top_hedge_fund_investments()
+    ui.section_header("Top Hedge Fund Investments", "Largest hedge fund positions")
+    ui.render_table(df, bold_first_col=False)

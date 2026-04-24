@@ -209,3 +209,21 @@ def load_ath_us():
 def load_ath_india():
     ws = _ws("ATH India")
     return _range_to_df(ws, "A4:M200")
+
+
+@st.cache_data(ttl=28800)
+def load_investor_holdings():
+    ws = _ws("Indian Investor Update")
+    return _range_to_df(ws, "B2:F500")
+
+
+@st.cache_data(ttl=28800)
+def load_hedge_funds():
+    ws = _ws("Hedge Funds ")   # trailing space is intentional
+    return _range_to_df(ws, "A4:G15")
+
+
+@st.cache_data(ttl=28800)
+def load_top_hedge_fund_investments():
+    ws = _ws("Top Hedge Fund Investments")
+    return _range_to_df(ws, "B1:I11")
