@@ -29,15 +29,40 @@ def _ws(name: str):
 
 # ── Range → DataFrame ─────────────────────────────────────
 
-def _range_to_df(ws, range_str: str, header_idx: int | None = None) -> pd.DataFrame:
+def _expected_col_count(range_str: str) -> int | None:
+    """Parse a sheet range like 'B3:L17' and return the column span (11)."""
+    import re
+    m = re.match(r"^([A-Za-z]+)\d+:([A-Za-z]+)\d+$", range_str.strip())
+    if not m:
+        return None
+    def col_to_num(s):
+        n = 0
+        for c in s.upper():
+            n = n * 26 + (ord(c) - 64)
+        return n
+    return col_to_num(m.group(2)) - col_to_num(m.group(1)) + 1
+
+
+def _range_to_df(ws, range_str: str, header_idx: int | None = None,
+                 keep_blank_cols: bool = False) -> pd.DataFrame:
     """
     Read a cell range from a worksheet.
     First non-empty row is treated as headers unless header_idx is specified.
     Completely empty rows are dropped.
+    keep_blank_cols=True preserves columns whose header cell is blank
+    (instead of silently dropping them) — useful when a sheet column may
+    have a missing header but the data is still wanted.
     """
     values = ws.get(range_str)
     if not values:
         return pd.DataFrame()
+
+    # gspread trims trailing blank cells per row, so a row of width 11 with
+    # an empty last cell comes back as length 10. Pad every row up to the
+    # column span implied by range_str so the rightmost column survives.
+    expected = _expected_col_count(range_str)
+    if expected:
+        values = [list(r) + [""] * max(0, expected - len(r)) for r in values]
 
     # Use forced header index or auto-detect
     if header_idx is None:
@@ -73,8 +98,9 @@ def _range_to_df(ws, range_str: str, header_idx: int | None = None) -> pd.DataFr
         clean.append(h)
 
     df = pd.DataFrame(data_rows, columns=clean)
-    # Drop filler columns created for unnamed sheet columns
-    df = df.loc[:, ~df.columns.str.startswith("_col")]
+    if not keep_blank_cols:
+        # Drop filler columns created for unnamed sheet columns
+        df = df.loc[:, ~df.columns.str.startswith("_col")]
     return df
 
 
@@ -124,15 +150,15 @@ def load_global_indices():
 @st.cache_data(ttl=28800)
 def load_nifty_indices():
     ws = _ws("NIFTY Indices")
-    t1 = _range_to_df(ws, "B3:L17")
-    t2 = _range_to_df(ws, "B20:L28")
+    t1 = _range_to_df(ws, "B3:L17", keep_blank_cols=True)
+    t2 = _range_to_df(ws, "B20:L28", keep_blank_cols=True)
     return t1, t2
 
 
 @st.cache_data(ttl=28800)
 def load_nifty_sectors():
     ws = _ws("NIFTY Sectors")
-    return _range_to_df(ws, "B3:L17")
+    return _range_to_df(ws, "B3:L17", keep_blank_cols=True)
 
 
 @st.cache_data(ttl=28800)

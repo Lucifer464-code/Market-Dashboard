@@ -728,7 +728,7 @@ class ZerodhaDataEngine:
                 pe                = self._pe_for(ticker, pe_map)
                 updates.append({
                     "range":  f"D{sheet_row}:L{sheet_row}",
-                    "values": [[pe] + returns],
+                    "values": [[returns[0], pe] + returns[1:]],
                 })
 
         self.sheet_client.batch_update(worksheet, updates)
@@ -781,7 +781,7 @@ class ZerodhaDataEngine:
                 pe                = self._pe_for(ticker, pe_map)
                 updates.append({
                     "range":  f"D{sheet_row}:L{sheet_row}",
-                    "values": [[pe] + returns],
+                    "values": [[returns[0], pe] + returns[1:]],
                 })
 
         self.sheet_client.batch_update(worksheet, updates)

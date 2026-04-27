@@ -349,7 +349,7 @@ elif section == "Additional NIFTY Sector Indices":
                       price_as_of=price_as_of)
     t1 = t1.drop(t1.columns[1], axis=1)
     t1 = ui.sort_by_keyword(t1, "5d")
-    ui.render_stat_cards(t1.drop(t1.columns[1], axis=1))   # exclude P/E from cards
+    ui.render_stat_cards(t1.drop(t1.columns[2], axis=1))   # exclude P/E from cards
     ui.render_table(t1, bold_first_col=False)
 
 elif section == "Broad Market Indices":
@@ -360,7 +360,7 @@ elif section == "Broad Market Indices":
     if not t2.empty:
         t2 = t2.drop(t2.columns[1], axis=1)
         t2 = ui.sort_by_keyword(t2, "5d")
-        ui.render_stat_cards(t2.drop(t2.columns[1], axis=1))   # exclude P/E from cards
+        ui.render_stat_cards(t2.drop(t2.columns[2], axis=1))   # exclude P/E from cards
         ui.render_table(t2, bold_first_col=False)
 
 elif section == "NIFTY 500 Momentum 50":
@@ -405,7 +405,7 @@ elif section == "NIFTY Sectors":
                       price_as_of=price_as_of)
     df = df.drop(df.columns[1], axis=1)
     df = ui.sort_by_keyword(df, "5d")
-    ui.render_stat_cards(df.drop(df.columns[1], axis=1))   # exclude P/E from cards
+    ui.render_stat_cards(df.drop(df.columns[2], axis=1))   # exclude P/E from cards
     ui.render_table(df, bold_first_col=False)
 
 elif section == "ETFs US":
