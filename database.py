@@ -624,6 +624,72 @@ class ZerodhaDataEngine:
         start_date = end_date - relativedelta(years=4)
         return self._fetch_index_returns(zerodha_ticker, start_date, end_date)
 
+    # Zerodha tradingsymbol → NSE allIndices "index" name (used only when they differ)
+    _NSE_PE_NAME_OVERRIDES = {
+        "NIFTY FIN SERVICE":   "NIFTY FINANCIAL SERVICES",
+        "NIFTY FINSRV25 50":   "NIFTY FINANCIAL SERVICES",
+        "NIFTY FINSEREXBNK":   "NIFTY FINANCIAL SERVICES EX-BANK",
+        "NIFTY PVT BANK":      "NIFTY PRIVATE BANK",
+        "NIFTY MID 100 FREE":  "NIFTY MIDCAP 100",
+        "NIFTY MID 50":        "NIFTY MIDCAP 50",
+        "NIFTY MID 150":       "NIFTY MIDCAP 150",
+        "NIFTY SMLCAP 100":    "NIFTY SMALLCAP 100",
+        "NIFTY SMLCAP 50":     "NIFTY SMALLCAP 50",
+        "NIFTY SMLCAP 250":    "NIFTY SMALLCAP 250",
+        "NIFTY MIDSML 400":    "NIFTY MIDSMALLCAP 400",
+        "NIFTY CONSR DURBL":   "NIFTY CONSUMER DURABLES",
+        "NIFTY HEALTHCARE":    "NIFTY HEALTHCARE INDEX",
+        "NIFTY INFRA":         "NIFTY INFRASTRUCTURE",
+        "NIFTY OIL AND GAS":   "NIFTY OIL & GAS",
+        "NIFTY OIL & GAS":     "NIFTY OIL & GAS",
+        "NIFTY IND TOURISM":   "NIFTY INDIA TOURISM",
+        "NIFTY TOURISM":       "NIFTY INDIA TOURISM",
+        "NIFTY CAP MKTS":      "NIFTY CAPITAL MARKETS",
+        "NIFTY CAPITAL MKTS":  "NIFTY CAPITAL MARKETS",
+        "NIFTY CAPITAL MKT":   "NIFTY CAPITAL MARKETS",
+        "NIFTY MICROCAP250":   "NIFTY MICROCAP 250",
+        "NIFTY MICRO 250":     "NIFTY MICROCAP 250",
+        "NIFTY IND DEFENCE":   "NIFTY INDIA DEFENCE",
+        "NIFTY INDIA DEFENCE": "NIFTY INDIA DEFENCE",
+        "NIFTY DEFENCE":       "NIFTY INDIA DEFENCE",
+    }
+
+    def _fetch_nse_pe_map(self) -> dict:
+        """Fetch official daily P/E for every NSE index via the public allIndices
+        endpoint. Returns {INDEX_NAME_UPPER: pe_float}. Empty dict on failure —
+        callers fall back to "NA"."""
+        try:
+            sess = requests.Session()
+            sess.headers.update({
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                              "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+                "Accept":          "application/json, text/plain, */*",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer":         "https://www.nseindia.com/",
+            })
+            sess.get("https://www.nseindia.com/", timeout=10)   # cookie seed
+            r = sess.get("https://www.nseindia.com/api/allIndices", timeout=10)
+            r.raise_for_status()
+            out = {}
+            for row in r.json().get("data", []):
+                name = str(row.get("index", "")).strip().upper()
+                pe   = row.get("pe")
+                if name and pe not in (None, "", "-"):
+                    try:
+                        out[name] = float(pe)
+                    except (TypeError, ValueError):
+                        pass
+            return out
+        except Exception as e:
+            print(f"  [WARN] NSE PE fetch failed: {type(e).__name__}: {e}")
+            return {}
+
+    def _pe_for(self, zerodha_ticker: str, pe_map: dict):
+        """Resolve a P/E for a given Zerodha tradingsymbol via the override map."""
+        name = self._NSE_PE_NAME_OVERRIDES.get(zerodha_ticker, zerodha_ticker)
+        pe   = pe_map.get(name.upper())
+        return round(pe, 2) if pe is not None else "NA"
+
     def update_nifty_indices(self):
 
         print("Updating NSE Indices...")
@@ -647,26 +713,29 @@ class ZerodhaDataEngine:
         end_date   = datetime.now()
         start_date = end_date - relativedelta(years=4)
 
+        pe_map = self._fetch_nse_pe_map()
+
         # Parallel fetch across all indices
         updates = []
         with ThreadPoolExecutor(max_workers=self.KITE_WORKERS) as pool:
-            future_to_row = {
-                pool.submit(self._fetch_index_returns, ticker, start_date, end_date): sheet_row
+            future_to_meta = {
+                pool.submit(self._fetch_index_returns, ticker, start_date, end_date): (ticker, sheet_row)
                 for ticker, sheet_row in index_rows
             }
-            for future in as_completed(future_to_row):
-                sheet_row = future_to_row[future]
-                returns   = ReturnCalculator.clean(future.result())
+            for future in as_completed(future_to_meta):
+                ticker, sheet_row = future_to_meta[future]
+                returns           = ReturnCalculator.clean(future.result())
+                pe                = self._pe_for(ticker, pe_map)
                 updates.append({
-                    "range":  f"D{sheet_row}:K{sheet_row}",
-                    "values": [returns],
+                    "range":  f"D{sheet_row}:L{sheet_row}",
+                    "values": [[pe] + returns],
                 })
 
         self.sheet_client.batch_update(worksheet, updates)
 
-        # Sort each table section by 5D performance (col F = 6, descending)
-        worksheet.sort((6, 'des'), range="A4:K17")
-        worksheet.sort((6, 'des'), range="A21:K28")
+        # Sort each table section by 5D performance (col G = 7 after PE insert, descending)
+        worksheet.sort((7, 'des'), range="A4:L17")
+        worksheet.sort((7, 'des'), range="A21:L28")
 
         price_as_of, updated_at = _make_metadata("IN")
         self.sheet_client.batch_update(worksheet, [
@@ -697,25 +766,28 @@ class ZerodhaDataEngine:
         end_date   = datetime.now()
         start_date = end_date - relativedelta(years=4)
 
+        pe_map = self._fetch_nse_pe_map()
+
         # Parallel fetch across all sectors (pass open_col=True to include open series)
         updates = []
         with ThreadPoolExecutor(max_workers=self.KITE_WORKERS) as pool:
-            future_to_row = {
-                pool.submit(self._fetch_index_returns, ticker, start_date, end_date, open_col=True): sheet_row
+            future_to_meta = {
+                pool.submit(self._fetch_index_returns, ticker, start_date, end_date, open_col=True): (ticker, sheet_row)
                 for ticker, sheet_row in sector_rows
             }
-            for future in as_completed(future_to_row):
-                sheet_row = future_to_row[future]
-                returns   = ReturnCalculator.clean(future.result())
+            for future in as_completed(future_to_meta):
+                ticker, sheet_row = future_to_meta[future]
+                returns           = ReturnCalculator.clean(future.result())
+                pe                = self._pe_for(ticker, pe_map)
                 updates.append({
-                    "range":  f"D{sheet_row}:K{sheet_row}",
-                    "values": [returns],
+                    "range":  f"D{sheet_row}:L{sheet_row}",
+                    "values": [[pe] + returns],
                 })
 
         self.sheet_client.batch_update(worksheet, updates)
 
-        # Sort by 5D performance (col F = 6, descending)
-        worksheet.sort((6, 'des'), range="A4:K17")
+        # Sort by 5D performance (col G = 7 after PE insert, descending)
+        worksheet.sort((7, 'des'), range="A4:L17")
 
         price_as_of, updated_at = _make_metadata("IN")
         self.sheet_client.batch_update(worksheet, [

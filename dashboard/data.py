@@ -124,15 +124,15 @@ def load_global_indices():
 @st.cache_data(ttl=28800)
 def load_nifty_indices():
     ws = _ws("NIFTY Indices")
-    t1 = _range_to_df(ws, "B3:K17")
-    t2 = _range_to_df(ws, "B20:K28")
+    t1 = _range_to_df(ws, "B3:L17")
+    t2 = _range_to_df(ws, "B20:L28")
     return t1, t2
 
 
 @st.cache_data(ttl=28800)
 def load_nifty_sectors():
     ws = _ws("NIFTY Sectors")
-    return _range_to_df(ws, "B3:K17")
+    return _range_to_df(ws, "B3:L17")
 
 
 @st.cache_data(ttl=28800)
