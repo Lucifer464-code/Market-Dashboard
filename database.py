@@ -123,17 +123,6 @@ class GoogleSheetClient:
 # RETURN CALCULATOR
 # ======================================================
 
-# TEMP: 2D/3D/4D columns inserted between 1D and 5D on
-# Global Indices, NIFTY Sectors, NIFTY500Moment.50, and S&P500 Sectors.
-# Flip to False to revert to the original layout (also undo the sheet column
-# inserts manually). Only the four affected engines read this flag; other
-# pages (ETFs India, Crypto, Mutual Funds, Manual ETFs, NIFTY Indices) are
-# unaffected because they call ReturnCalculator.calculate() with the default
-# include_short_term=False.
-TEMP_2D_3D_4D_COLS = True
-_EXTRA_COLS = 3 if TEMP_2D_3D_4D_COLS else 0
-RETURN_COUNT_EXT = 8 + _EXTRA_COLS  # what affected engines expect from calculate(include_short_term=True)
-
 class ReturnCalculator:
 
     @staticmethod
@@ -163,13 +152,10 @@ class ReturnCalculator:
         return cleaned
 
     @staticmethod
-    def calculate(close_series, current_price, open_series=None, include_short_term=False):
-        # include_short_term=True inserts 2D/3D/4D between 1D and 5D — opt-in per
-        # caller so pages that didn't add the temp columns are unaffected.
-        n_out = 8 + (3 if include_short_term else 0)
+    def calculate(close_series, current_price, open_series=None):
 
         if close_series is None or close_series.empty or current_price is None:
-            return ["NA"] * n_out
+            return ["NA"] * 8
 
         close_series = close_series.dropna().sort_index()
 
@@ -218,22 +204,16 @@ class ReturnCalculator:
                 return "NA"
             return (current_price / past_price - 1) * 100
 
-        out = [current_price, ret_by_trading_days(1)]
-        if include_short_term:
-            out.extend([
-                ret_by_trading_days(2),
-                ret_by_trading_days(3),
-                ret_by_trading_days(4),
-            ])
-        out.extend([
+        return [
+            current_price,
+            ret_by_trading_days(1),
             ret_by_trading_days(5),
             ret(today - pd.DateOffset(months=1)),
             ret(today - pd.DateOffset(months=3)),
             ret(today - pd.DateOffset(months=6)),
             ret(today - pd.DateOffset(years=1)),
             ret(today - pd.DateOffset(years=3)),
-        ])
-        return out
+        ]
 
 
 # ======================================================
@@ -405,9 +385,9 @@ class YahooDataEngine:
                 print(f"  [WARN] No ticker match for '{name}'")
 
         # Default NA for all rows (overwritten below where data is fetched)
-        mcap_values   = {row: "NA"                  for row, _ in resolved}  # col C
-        pe_values     = {row: "NA"                  for row, _ in resolved}  # col D
-        return_values = {row: ["NA"] * RETURN_COUNT_EXT for row, _ in resolved}  # cols E:L (or E:O if 2D/3D/4D enabled)
+        mcap_values   = {row: "NA"       for row, _ in resolved}  # col C
+        pe_values     = {row: "NA"       for row, _ in resolved}  # col D
+        return_values = {row: ["NA"] * 8 for row, _ in resolved}  # cols E:L
 
         tickers_with_rows = [(t + ".NS", r) for r, t in resolved if t]
 
@@ -454,7 +434,7 @@ class YahooDataEngine:
                     if close_series is None or close_series.empty:
                         raise ValueError(f"no price data for {symbol}")
                     current_price = ReturnCalculator.last_confirmed_close(close_series)
-                    returns       = ReturnCalculator.calculate(close_series, current_price, include_short_term=True)
+                    returns       = ReturnCalculator.calculate(close_series, current_price)
                     return_values[sheet_row] = ReturnCalculator.clean(returns)
                 except Exception as e:
                     print(f"  [WARN] {symbol} price fetch failed: {e}")
@@ -465,14 +445,12 @@ class YahooDataEngine:
                 if pe:
                     pe_values[sheet_row] = round(pe, 2)
 
-        # Batch write: C (mcap), D (P/E), E:end (returns) for each row.
-        # End col widens from L to O when 2D/3D/4D temp cols are enabled.
-        end_col = chr(ord('L') + _EXTRA_COLS)
+        # Batch write: C (mcap), D (P/E), E:L (returns) for each row
         updates = []
         for row, _ in resolved:
-            updates.append({"range": f"C{row}",                "values": [[mcap_values[row]]]})
-            updates.append({"range": f"D{row}",                "values": [[pe_values[row]]]})
-            updates.append({"range": f"E{row}:{end_col}{row}", "values": [return_values[row]]})
+            updates.append({"range": f"C{row}",       "values": [[mcap_values[row]]]})
+            updates.append({"range": f"D{row}",       "values": [[pe_values[row]]]})
+            updates.append({"range": f"E{row}:L{row}", "values": [return_values[row]]})
         self.sheet_client.batch_update(worksheet, updates)
 
         price_as_of, updated_at = _make_metadata("IN")
@@ -600,7 +578,7 @@ class ZerodhaDataEngine:
 
         return token_map
 
-    def _fetch_index_returns(self, ticker, start_date, end_date, open_col=None, include_short_term=False):
+    def _fetch_index_returns(self, ticker, start_date, end_date, open_col=None):
         """
         Fetch historical data for one index and return calculated returns.
         Designed to be called from a thread pool.
@@ -608,16 +586,15 @@ class ZerodhaDataEngine:
         Kite historical_data("day") never returns a live intraday candle, so
         we override current_price with kite.ltp() when the India market is open.
         """
-        n_out = 8 + (3 if include_short_term else 0)
         token = self.index_token_map.get(ticker)
         if not token:
             print(f"  [WARN] {ticker}: not found in instrument cache")
-            return ["NA"] * n_out
+            return ["NA"] * 8
         try:
             candles = self.kite.historical_data(token, start_date, end_date, "day")
             if not candles:
                 print(f"  [WARN] {ticker}: Kite returned empty candles (token={token})")
-                return ["NA"] * n_out
+                return ["NA"] * 8
             df = pd.DataFrame(candles)
             df["date"] = pd.to_datetime(df["date"])
             df.set_index("date", inplace=True)
@@ -636,16 +613,16 @@ class ZerodhaDataEngine:
                 except Exception:
                     pass   # fall back to last historical close
 
-            return ReturnCalculator.calculate(close_series, current_price, open_series, include_short_term=include_short_term)
+            return ReturnCalculator.calculate(close_series, current_price, open_series)
         except Exception as e:
             print(f"  [WARN] {ticker}: {type(e).__name__}: {e}")
-            return ["NA"] * n_out
+            return ["NA"] * 8
 
-    def get_returns(self, zerodha_ticker: str, include_short_term: bool = False) -> list:
+    def get_returns(self, zerodha_ticker: str) -> list:
         """Fetch returns for one index without writing to any sheet."""
         end_date   = datetime.now()
         start_date = end_date - relativedelta(years=4)
-        return self._fetch_index_returns(zerodha_ticker, start_date, end_date, include_short_term=include_short_term)
+        return self._fetch_index_returns(zerodha_ticker, start_date, end_date)
 
     # Zerodha tradingsymbol → NSE allIndices "index" name (used only when they differ)
     _NSE_PE_NAME_OVERRIDES = {
@@ -740,10 +717,9 @@ class ZerodhaDataEngine:
 
         # Parallel fetch across all indices
         updates = []
-        end_col = chr(ord('L') + _EXTRA_COLS)
         with ThreadPoolExecutor(max_workers=self.KITE_WORKERS) as pool:
             future_to_meta = {
-                pool.submit(self._fetch_index_returns, ticker, start_date, end_date, include_short_term=True): (ticker, sheet_row)
+                pool.submit(self._fetch_index_returns, ticker, start_date, end_date): (ticker, sheet_row)
                 for ticker, sheet_row in index_rows
             }
             for future in as_completed(future_to_meta):
@@ -751,16 +727,15 @@ class ZerodhaDataEngine:
                 returns           = ReturnCalculator.clean(future.result())
                 pe                = self._pe_for(ticker, pe_map)
                 updates.append({
-                    "range":  f"D{sheet_row}:{end_col}{sheet_row}",
+                    "range":  f"D{sheet_row}:L{sheet_row}",
                     "values": [[returns[0], pe] + returns[1:]],
                 })
 
         self.sheet_client.batch_update(worksheet, updates)
 
-        # Sort each table section by 5D performance — col G (=7) normally, shifts +3 with temp cols
-        sort_col = 7 + _EXTRA_COLS
-        worksheet.sort((sort_col, 'des'), range=f"A4:{end_col}17")
-        worksheet.sort((sort_col, 'des'), range=f"A21:{end_col}28")
+        # Sort each table section by 5D performance (col G = 7 after PE insert, descending)
+        worksheet.sort((7, 'des'), range="A4:L17")
+        worksheet.sort((7, 'des'), range="A21:L28")
 
         price_as_of, updated_at = _make_metadata("IN")
         self.sheet_client.batch_update(worksheet, [
@@ -797,24 +772,22 @@ class ZerodhaDataEngine:
         updates = []
         with ThreadPoolExecutor(max_workers=self.KITE_WORKERS) as pool:
             future_to_meta = {
-                pool.submit(self._fetch_index_returns, ticker, start_date, end_date, open_col=True, include_short_term=True): (ticker, sheet_row)
+                pool.submit(self._fetch_index_returns, ticker, start_date, end_date, open_col=True): (ticker, sheet_row)
                 for ticker, sheet_row in sector_rows
             }
             for future in as_completed(future_to_meta):
                 ticker, sheet_row = future_to_meta[future]
                 returns           = ReturnCalculator.clean(future.result())
                 pe                = self._pe_for(ticker, pe_map)
-                end_col = chr(ord('L') + _EXTRA_COLS)
                 updates.append({
-                    "range":  f"D{sheet_row}:{end_col}{sheet_row}",
+                    "range":  f"D{sheet_row}:L{sheet_row}",
                     "values": [[returns[0], pe] + returns[1:]],
                 })
 
         self.sheet_client.batch_update(worksheet, updates)
 
-        # Sort by 5D performance — col G (=7) normally, shifts +3 with temp cols
-        sort_end_col = chr(ord('L') + _EXTRA_COLS)
-        worksheet.sort((7 + _EXTRA_COLS, 'des'), range=f"A4:{sort_end_col}17")
+        # Sort by 5D performance (col G = 7 after PE insert, descending)
+        worksheet.sort((7, 'des'), range="A4:L17")
 
         price_as_of, updated_at = _make_metadata("IN")
         self.sheet_client.batch_update(worksheet, [
@@ -1000,8 +973,7 @@ class GlobalIndicesEngine:
         updates   = []
         for ticker, sheet_row in ticker_rows:
             if ticker in overrides:
-                # Use pre-fetched returns from another engine (e.g. Zerodha for NIFTY 50).
-                # Overrides arrive in the include_short_term shape (see _global_indices_overrides).
+                # Use pre-fetched returns from another engine (e.g. Zerodha for NIFTY 50)
                 returns = ReturnCalculator.clean(overrides[ticker]) + ["NA"]
             else:
                 try:
@@ -1011,10 +983,10 @@ class GlobalIndicesEngine:
                     if close_series is None or close_series.empty:
                         raise ValueError(f"no data for {ticker}")
                     current_price = live_prices.get(ticker)
-                    returns       = ReturnCalculator.calculate(close_series, current_price, include_short_term=True)
+                    returns       = ReturnCalculator.calculate(close_series, current_price)
                 except Exception as e:
                     print(f"  [WARN] {ticker}: {e}")
-                    returns = ["NA"] * RETURN_COUNT_EXT
+                    returns = ["NA"] * 8
                 returns = ReturnCalculator.clean(returns) + ["NA"]   # pad 5Y column
             updates.append({"range": range_fn(sheet_row), "values": [returns]})
         return updates
@@ -1036,17 +1008,14 @@ class GlobalIndicesEngine:
 
         price_data, live_prices = self._fetch_data(all_symbols)
 
-        end_col = chr(ord('L') + _EXTRA_COLS)
-        range_fn = lambda r, _end=end_col: f"D{r}:{_end}{r}"
-        t1_updates = self._build_updates(t1_rows, price_data, live_prices, all_symbols, range_fn, overrides)
-        t2_updates = self._build_updates(t2_rows, price_data, live_prices, all_symbols, range_fn, overrides)
+        t1_updates = self._build_updates(t1_rows, price_data, live_prices, all_symbols, lambda r: f"D{r}:L{r}", overrides)
+        t2_updates = self._build_updates(t2_rows, price_data, live_prices, all_symbols, lambda r: f"D{r}:L{r}", overrides)
 
         self.sheet_client.batch_update(worksheet, t1_updates + t2_updates)
 
-        # Sort each table by 5D performance — col F (=6) normally, shifts +3 with temp cols
-        sort_col = 6 + _EXTRA_COLS
-        worksheet.sort((sort_col, 'des'), range=f"A5:{end_col}17")
-        worksheet.sort((sort_col, 'des'), range=f"A23:{end_col}80")
+        # Sort each table by 5D performance (col F = 6, descending)
+        worksheet.sort((6, 'des'), range="A5:L17")
+        worksheet.sort((6, 'des'), range="A23:L80")
 
         price_as_of, updated_at = _make_metadata("GLOBAL")
         self.sheet_client.batch_update(worksheet, [
@@ -1303,26 +1272,25 @@ class SP500SectorsEngine:
         )
 
         updates = []
-        end_col = chr(ord('K') + _EXTRA_COLS)
         for symbol, sheet_row in tickers:
             try:
                 close = _extract_close(data, symbol, symbols)
                 if close is None or close.empty:
                     raise ValueError(f"no data for {symbol}")
                 current_price = ReturnCalculator.last_confirmed_close(close)
-                returns       = ReturnCalculator.calculate(close, current_price, include_short_term=True)
+                returns       = ReturnCalculator.calculate(close, current_price)
             except Exception as e:
                 print(f"  [WARN] {symbol}: {e}")
-                returns = ["NA"] * RETURN_COUNT_EXT
+                returns = ["NA"] * 8
             updates.append({
-                "range":  f"D{sheet_row}:{end_col}{sheet_row}",
+                "range":  f"D{sheet_row}:K{sheet_row}",
                 "values": [ReturnCalculator.clean(returns)],
             })
 
         self.sheet_client.batch_update(ws, updates)
 
-        # Sort by 5D performance — col F (=6) normally, shifts +3 with temp cols
-        ws.sort((6 + _EXTRA_COLS, 'des'), range=f"A4:{end_col}14")
+        # Sort by 5D performance (col F = 6, descending)
+        ws.sort((6, 'des'), range="A4:K14")
 
         price_as_of, updated_at = _make_metadata("US")
         self.sheet_client.batch_update(ws, [
@@ -1501,8 +1469,8 @@ class MarketUpdater:
         overrides = {}
         for zerodha_ticker, yf_symbol in self._ZERODHA_GLOBAL_OVERRIDES.items():
             try:
-                returns = self.zerodha.get_returns(zerodha_ticker, include_short_term=True)
-                if returns and returns != ["NA"] * RETURN_COUNT_EXT:
+                returns = self.zerodha.get_returns(zerodha_ticker)
+                if returns and returns != ["NA"] * 8:
                     overrides[yf_symbol] = returns
                     print(f"  Global Indices override: {zerodha_ticker} → {yf_symbol} (Zerodha)")
             except Exception as e:
