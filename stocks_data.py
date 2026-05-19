@@ -115,11 +115,14 @@ class StocksDataEngine:
     ATH_THRESHOLD = 0.05    # within 5% of all-time high
 
     # ── Data sources ──────────────────────────────────────────
-    RUSSELL_3000_URL = (
-        "https://www.ishares.com/us/products/239714/"
-        "ishares-russell-3000-etf/1467271812596.ajax"
-        "?fileType=csv&fileName=IWV_holdings&dataType=fund"
+    # Vanguard VTI (Total Stock Market ETF) — ~3,400 holdings, covers Russell 3000
+    # universe. Switched from iShares IWV in 2026-05 after iShares put the .ajax
+    # CSV endpoint behind a JS/bot wall that returns HTML regardless of headers.
+    US_HOLDINGS_URL = (
+        "https://investor.vanguard.com/investment-products/etfs/profile/"
+        "api/vti/portfolio-holding/stock"
     )
+    US_HOLDINGS_PAGE_SIZE = 500
     NIFTY_TOTAL_MARKET_URL = (
         "https://nsearchives.nseindia.com/content/indices/ind_niftytotalmarket_list.csv"
     )
@@ -154,10 +157,10 @@ class StocksDataEngine:
 
     # ── Universe cache (pickle) ───────────────────────────────
 
-    def _load_pkl_cache(self, path):
+    def _load_pkl_cache(self, path, *, allow_stale: bool = False):
         if not os.path.exists(path):
             return None
-        if (time.time() - os.path.getmtime(path)) / 3600 > self.CACHE_TTL_HOURS:
+        if not allow_stale and (time.time() - os.path.getmtime(path)) / 3600 > self.CACHE_TTL_HOURS:
             return None
         with open(path, "rb") as f:
             return pickle.load(f)
@@ -195,63 +198,80 @@ class StocksDataEngine:
 
     def _fetch_russell3000(self) -> tuple:
         """
-        Parse iShares Russell 3000 CSV.
-        Returns (tickers, name_map) where names come directly from the
-        CSV 'Name' column — no yfinance lookup needed for US stocks.
-        Cache stores (tickers, name_map) tuple.
+        Fetch US universe from Vanguard VTI portfolio-holdings JSON API.
+        Returns (tickers, name_map) — same contract as before; the method name
+        is kept for backward compatibility with the cache file and call site.
+        On fetch failure, falls back to the pickle cache even if stale.
         """
         cached = self._load_pkl_cache(self.US_CACHE_FILE)
         if cached:
-            # Handle old cache format (list only) gracefully
             if isinstance(cached, tuple):
                 tickers, name_map = cached
-                # Normalize to title case in case cache was built before this fix
                 name_map = {k: v.title() for k, v in name_map.items()}
             else:
-                tickers  = cached
-                name_map = {}
-            print(f"  Russell 3000: using cache ({len(tickers)} tickers)")
+                tickers, name_map = cached, {}
+            print(f"  US universe: using cache ({len(tickers)} tickers)")
             return tickers, name_map
 
-        print("  Downloading Russell 3000 from iShares...")
+        print("  Downloading US universe (Vanguard VTI)...")
         try:
-            r = requests.get(self.RUSSELL_3000_URL, headers=self.HEADERS, timeout=30)
-            r.raise_for_status()
+            holdings = []
+            start = 1
+            while True:
+                url = (
+                    f"{self.US_HOLDINGS_URL}"
+                    f"?start={start}&count={self.US_HOLDINGS_PAGE_SIZE}"
+                )
+                r = requests.get(
+                    url,
+                    headers={**self.HEADERS, "Accept": "application/json"},
+                    timeout=30,
+                )
+                r.raise_for_status()
+                page = r.json().get("fund", {}).get("entity", []) or []
+                if not page:
+                    break
+                holdings.extend(page)
+                if len(page) < self.US_HOLDINGS_PAGE_SIZE:
+                    break
+                start += self.US_HOLDINGS_PAGE_SIZE
 
-            lines      = r.text.splitlines()
-            header_idx = next(
-                (i for i, line in enumerate(lines) if line.startswith("Ticker,")), None
-            )
-            if header_idx is None:
-                print("  [ERROR] Header row not found in iShares CSV.")
-                return [], {}
+            df = pd.DataFrame(holdings)
+            if df.empty or "ticker" not in df.columns:
+                raise RuntimeError("Vanguard VTI response missing ticker column")
 
-            df = pd.read_csv(io.StringIO("\n".join(lines[header_idx:])))
-            df.columns = df.columns.str.strip()
-            df = df[df["Asset Class"].str.strip().str.lower() == "equity"]
+            df["Ticker"] = df["ticker"].astype(str).str.strip().str.upper()
+            # Prefer longName ("NVIDIA Corp.") over shortName ("NVIDIA CORP")
+            name_col = "longName" if "longName" in df.columns else "shortName"
+            df["Name"] = df[name_col].astype(str).str.strip().str.title()
 
-            # Clean tickers
-            df["Ticker"] = df["Ticker"].astype(str).str.strip().str.upper()
+            # Filter to clean equity tickers (alpha, <=5 chars, drop placeholders)
             df = df[
                 df["Ticker"].apply(
                     lambda t: bool(t and t != "-" and t.isalpha() and len(t) <= 5)
                 )
             ]
+            df = df.drop_duplicates(subset=["Ticker"], keep="first")
 
-            # Build name map from CSV Name column directly
-            name_map = dict(zip(
-                df["Ticker"],
-                df["Name"].astype(str).str.strip().str.title()
-            ))
-
+            name_map = dict(zip(df["Ticker"], df["Name"]))
             tickers = df["Ticker"].tolist()
 
-            print(f"  Russell 3000: {len(tickers)} tickers, {len(name_map)} names loaded from CSV")
+            print(f"  US universe: {len(tickers)} tickers, {len(name_map)} names loaded from VTI")
             self._save_pkl_cache(self.US_CACHE_FILE, (tickers, name_map))
             return tickers, name_map
 
         except Exception as e:
-            print(f"  [ERROR] Russell 3000 fetch failed: {e}")
+            print(f"  [ERROR] US universe fetch failed: {e}")
+            stale = self._load_pkl_cache(self.US_CACHE_FILE, allow_stale=True)
+            if stale:
+                if isinstance(stale, tuple):
+                    tickers, name_map = stale
+                    name_map = {k: v.title() for k, v in name_map.items()}
+                else:
+                    tickers, name_map = stale, {}
+                age_h = (time.time() - os.path.getmtime(self.US_CACHE_FILE)) / 3600
+                print(f"  [FALLBACK] Using stale cache ({len(tickers)} tickers, {age_h:.0f}h old)")
+                return tickers, name_map
             return [], {}
 
     # ── Universe: NIFTY 500 ───────────────────────────────────
@@ -1052,7 +1072,7 @@ class StocksDataEngine:
             us_tickers, us_name_map = self._fetch_russell3000()
 
             if us_tickers:
-                # Always overwrite from iShares CSV — authoritative source,
+                # Always overwrite from Vanguard VTI — authoritative source,
                 # ensures any bad ticker=ticker entries get corrected immediately
                 updated = sum(1 for t, n in us_name_map.items() if name_cache.get(t) != n)
                 name_cache.update(us_name_map)
