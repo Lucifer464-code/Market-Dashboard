@@ -123,6 +123,17 @@ class GoogleSheetClient:
 # RETURN CALCULATOR
 # ======================================================
 
+# TEMP: 2D/3D/4D columns inserted between 1D and 5D on
+# Global Indices, NIFTY Sectors, NIFTY500Moment.50, and S&P500 Sectors.
+# Flip to False to revert to the original layout (also undo the sheet column
+# inserts manually). Only the four affected engines read this flag; other
+# pages (ETFs India, Crypto, Mutual Funds, Manual ETFs, NIFTY Indices) are
+# unaffected because they call ReturnCalculator.calculate() with the default
+# include_short_term=False.
+TEMP_2D_3D_4D_COLS = True
+_EXTRA_COLS = 3 if TEMP_2D_3D_4D_COLS else 0
+RETURN_COUNT_EXT = 8 + _EXTRA_COLS  # what affected engines expect from calculate(include_short_term=True)
+
 class ReturnCalculator:
 
     @staticmethod
@@ -152,10 +163,13 @@ class ReturnCalculator:
         return cleaned
 
     @staticmethod
-    def calculate(close_series, current_price, open_series=None):
+    def calculate(close_series, current_price, open_series=None, include_short_term=False):
+        # include_short_term=True inserts 2D/3D/4D between 1D and 5D — opt-in per
+        # caller so pages that didn't add the temp columns are unaffected.
+        n_out = 8 + (3 if include_short_term else 0)
 
         if close_series is None or close_series.empty or current_price is None:
-            return ["NA"] * 8
+            return ["NA"] * n_out
 
         close_series = close_series.dropna().sort_index()
 
@@ -204,16 +218,22 @@ class ReturnCalculator:
                 return "NA"
             return (current_price / past_price - 1) * 100
 
-        return [
-            current_price,
-            ret_by_trading_days(1),
+        out = [current_price, ret_by_trading_days(1)]
+        if include_short_term:
+            out.extend([
+                ret_by_trading_days(2),
+                ret_by_trading_days(3),
+                ret_by_trading_days(4),
+            ])
+        out.extend([
             ret_by_trading_days(5),
             ret(today - pd.DateOffset(months=1)),
             ret(today - pd.DateOffset(months=3)),
             ret(today - pd.DateOffset(months=6)),
             ret(today - pd.DateOffset(years=1)),
             ret(today - pd.DateOffset(years=3)),
-        ]
+        ])
+        return out
 
 
 # ======================================================
@@ -385,9 +405,9 @@ class YahooDataEngine:
                 print(f"  [WARN] No ticker match for '{name}'")
 
         # Default NA for all rows (overwritten below where data is fetched)
-        mcap_values   = {row: "NA"       for row, _ in resolved}  # col C
-        pe_values     = {row: "NA"       for row, _ in resolved}  # col D
-        return_values = {row: ["NA"] * 8 for row, _ in resolved}  # cols E:L
+        mcap_values   = {row: "NA"                  for row, _ in resolved}  # col C
+        pe_values     = {row: "NA"                  for row, _ in resolved}  # col D
+        return_values = {row: ["NA"] * RETURN_COUNT_EXT for row, _ in resolved}  # cols E:L (or E:O if 2D/3D/4D enabled)
 
         tickers_with_rows = [(t + ".NS", r) for r, t in resolved if t]
 
@@ -434,7 +454,7 @@ class YahooDataEngine:
                     if close_series is None or close_series.empty:
                         raise ValueError(f"no price data for {symbol}")
                     current_price = ReturnCalculator.last_confirmed_close(close_series)
-                    returns       = ReturnCalculator.calculate(close_series, current_price)
+                    returns       = ReturnCalculator.calculate(close_series, current_price, include_short_term=True)
                     return_values[sheet_row] = ReturnCalculator.clean(returns)
                 except Exception as e:
                     print(f"  [WARN] {symbol} price fetch failed: {e}")
@@ -445,12 +465,14 @@ class YahooDataEngine:
                 if pe:
                     pe_values[sheet_row] = round(pe, 2)
 
-        # Batch write: C (mcap), D (P/E), E:L (returns) for each row
+        # Batch write: C (mcap), D (P/E), E:end (returns) for each row.
+        # End col widens from L to O when 2D/3D/4D temp cols are enabled.
+        end_col = chr(ord('L') + _EXTRA_COLS)
         updates = []
         for row, _ in resolved:
-            updates.append({"range": f"C{row}",       "values": [[mcap_values[row]]]})
-            updates.append({"range": f"D{row}",       "values": [[pe_values[row]]]})
-            updates.append({"range": f"E{row}:L{row}", "values": [return_values[row]]})
+            updates.append({"range": f"C{row}",                "values": [[mcap_values[row]]]})
+            updates.append({"range": f"D{row}",                "values": [[pe_values[row]]]})
+            updates.append({"range": f"E{row}:{end_col}{row}", "values": [return_values[row]]})
         self.sheet_client.batch_update(worksheet, updates)
 
         price_as_of, updated_at = _make_metadata("IN")
@@ -578,7 +600,7 @@ class ZerodhaDataEngine:
 
         return token_map
 
-    def _fetch_index_returns(self, ticker, start_date, end_date, open_col=None):
+    def _fetch_index_returns(self, ticker, start_date, end_date, open_col=None, include_short_term=False):
         """
         Fetch historical data for one index and return calculated returns.
         Designed to be called from a thread pool.
@@ -586,15 +608,16 @@ class ZerodhaDataEngine:
         Kite historical_data("day") never returns a live intraday candle, so
         we override current_price with kite.ltp() when the India market is open.
         """
+        n_out = 8 + (3 if include_short_term else 0)
         token = self.index_token_map.get(ticker)
         if not token:
             print(f"  [WARN] {ticker}: not found in instrument cache")
-            return ["NA"] * 8
+            return ["NA"] * n_out
         try:
             candles = self.kite.historical_data(token, start_date, end_date, "day")
             if not candles:
                 print(f"  [WARN] {ticker}: Kite returned empty candles (token={token})")
-                return ["NA"] * 8
+                return ["NA"] * n_out
             df = pd.DataFrame(candles)
             df["date"] = pd.to_datetime(df["date"])
             df.set_index("date", inplace=True)
@@ -613,16 +636,16 @@ class ZerodhaDataEngine:
                 except Exception:
                     pass   # fall back to last historical close
 
-            return ReturnCalculator.calculate(close_series, current_price, open_series)
+            return ReturnCalculator.calculate(close_series, current_price, open_series, include_short_term=include_short_term)
         except Exception as e:
             print(f"  [WARN] {ticker}: {type(e).__name__}: {e}")
-            return ["NA"] * 8
+            return ["NA"] * n_out
 
-    def get_returns(self, zerodha_ticker: str) -> list:
+    def get_returns(self, zerodha_ticker: str, include_short_term: bool = False) -> list:
         """Fetch returns for one index without writing to any sheet."""
         end_date   = datetime.now()
         start_date = end_date - relativedelta(years=4)
-        return self._fetch_index_returns(zerodha_ticker, start_date, end_date)
+        return self._fetch_index_returns(zerodha_ticker, start_date, end_date, include_short_term=include_short_term)
 
     # Zerodha tradingsymbol → NSE allIndices "index" name (used only when they differ)
     _NSE_PE_NAME_OVERRIDES = {
@@ -717,9 +740,10 @@ class ZerodhaDataEngine:
 
         # Parallel fetch across all indices
         updates = []
+        end_col = chr(ord('L') + _EXTRA_COLS)
         with ThreadPoolExecutor(max_workers=self.KITE_WORKERS) as pool:
             future_to_meta = {
-                pool.submit(self._fetch_index_returns, ticker, start_date, end_date): (ticker, sheet_row)
+                pool.submit(self._fetch_index_returns, ticker, start_date, end_date, include_short_term=True): (ticker, sheet_row)
                 for ticker, sheet_row in index_rows
             }
             for future in as_completed(future_to_meta):
@@ -727,15 +751,16 @@ class ZerodhaDataEngine:
                 returns           = ReturnCalculator.clean(future.result())
                 pe                = self._pe_for(ticker, pe_map)
                 updates.append({
-                    "range":  f"D{sheet_row}:L{sheet_row}",
+                    "range":  f"D{sheet_row}:{end_col}{sheet_row}",
                     "values": [[returns[0], pe] + returns[1:]],
                 })
 
         self.sheet_client.batch_update(worksheet, updates)
 
-        # Sort each table section by 5D performance (col G = 7 after PE insert, descending)
-        worksheet.sort((7, 'des'), range="A4:L17")
-        worksheet.sort((7, 'des'), range="A21:L28")
+        # Sort each table section by 5D performance — col G (=7) normally, shifts +3 with temp cols
+        sort_col = 7 + _EXTRA_COLS
+        worksheet.sort((sort_col, 'des'), range=f"A4:{end_col}17")
+        worksheet.sort((sort_col, 'des'), range=f"A21:{end_col}28")
 
         price_as_of, updated_at = _make_metadata("IN")
         self.sheet_client.batch_update(worksheet, [
@@ -772,22 +797,24 @@ class ZerodhaDataEngine:
         updates = []
         with ThreadPoolExecutor(max_workers=self.KITE_WORKERS) as pool:
             future_to_meta = {
-                pool.submit(self._fetch_index_returns, ticker, start_date, end_date, open_col=True): (ticker, sheet_row)
+                pool.submit(self._fetch_index_returns, ticker, start_date, end_date, open_col=True, include_short_term=True): (ticker, sheet_row)
                 for ticker, sheet_row in sector_rows
             }
             for future in as_completed(future_to_meta):
                 ticker, sheet_row = future_to_meta[future]
                 returns           = ReturnCalculator.clean(future.result())
                 pe                = self._pe_for(ticker, pe_map)
+                end_col = chr(ord('L') + _EXTRA_COLS)
                 updates.append({
-                    "range":  f"D{sheet_row}:L{sheet_row}",
+                    "range":  f"D{sheet_row}:{end_col}{sheet_row}",
                     "values": [[returns[0], pe] + returns[1:]],
                 })
 
         self.sheet_client.batch_update(worksheet, updates)
 
-        # Sort by 5D performance (col G = 7 after PE insert, descending)
-        worksheet.sort((7, 'des'), range="A4:L17")
+        # Sort by 5D performance — col G (=7) normally, shifts +3 with temp cols
+        sort_end_col = chr(ord('L') + _EXTRA_COLS)
+        worksheet.sort((7 + _EXTRA_COLS, 'des'), range=f"A4:{sort_end_col}17")
 
         price_as_of, updated_at = _make_metadata("IN")
         self.sheet_client.batch_update(worksheet, [
@@ -973,7 +1000,8 @@ class GlobalIndicesEngine:
         updates   = []
         for ticker, sheet_row in ticker_rows:
             if ticker in overrides:
-                # Use pre-fetched returns from another engine (e.g. Zerodha for NIFTY 50)
+                # Use pre-fetched returns from another engine (e.g. Zerodha for NIFTY 50).
+                # Overrides arrive in the include_short_term shape (see _global_indices_overrides).
                 returns = ReturnCalculator.clean(overrides[ticker]) + ["NA"]
             else:
                 try:
@@ -983,10 +1011,10 @@ class GlobalIndicesEngine:
                     if close_series is None or close_series.empty:
                         raise ValueError(f"no data for {ticker}")
                     current_price = live_prices.get(ticker)
-                    returns       = ReturnCalculator.calculate(close_series, current_price)
+                    returns       = ReturnCalculator.calculate(close_series, current_price, include_short_term=True)
                 except Exception as e:
                     print(f"  [WARN] {ticker}: {e}")
-                    returns = ["NA"] * 8
+                    returns = ["NA"] * RETURN_COUNT_EXT
                 returns = ReturnCalculator.clean(returns) + ["NA"]   # pad 5Y column
             updates.append({"range": range_fn(sheet_row), "values": [returns]})
         return updates
@@ -1008,14 +1036,17 @@ class GlobalIndicesEngine:
 
         price_data, live_prices = self._fetch_data(all_symbols)
 
-        t1_updates = self._build_updates(t1_rows, price_data, live_prices, all_symbols, lambda r: f"D{r}:L{r}", overrides)
-        t2_updates = self._build_updates(t2_rows, price_data, live_prices, all_symbols, lambda r: f"D{r}:L{r}", overrides)
+        end_col = chr(ord('L') + _EXTRA_COLS)
+        range_fn = lambda r, _end=end_col: f"D{r}:{_end}{r}"
+        t1_updates = self._build_updates(t1_rows, price_data, live_prices, all_symbols, range_fn, overrides)
+        t2_updates = self._build_updates(t2_rows, price_data, live_prices, all_symbols, range_fn, overrides)
 
         self.sheet_client.batch_update(worksheet, t1_updates + t2_updates)
 
-        # Sort each table by 5D performance (col F = 6, descending)
-        worksheet.sort((6, 'des'), range="A5:L17")
-        worksheet.sort((6, 'des'), range="A23:L80")
+        # Sort each table by 5D performance — col F (=6) normally, shifts +3 with temp cols
+        sort_col = 6 + _EXTRA_COLS
+        worksheet.sort((sort_col, 'des'), range=f"A5:{end_col}17")
+        worksheet.sort((sort_col, 'des'), range=f"A23:{end_col}80")
 
         price_as_of, updated_at = _make_metadata("GLOBAL")
         self.sheet_client.batch_update(worksheet, [
@@ -1026,234 +1057,6 @@ class GlobalIndicesEngine:
         print(f"  Table 1 updated — {len(t1_updates)} indices OK")
         print(f"  Table 2 updated — {len(t2_updates)} indices OK")
         print("Global Indices updated OK\n")
-
-
-# ======================================================
-# ETFDB SCRAPER ENGINE
-# ======================================================
-
-class ETFdbEngine:
-    """
-    Scrapes ETF metadata (ticker, name, AUM) from the ETFdb screener API,
-    then enriches each ETF with price / return data from yfinance.
-
-    Sheet layout written by this engine:
-        "Biggest Leveraged Funds "  → A=Ticker  B=Name  C=AUM  F:L=Price+Returns
-        "Biggest Leveraged Funds(Com.)" → A=Ticker  B=Name  C=AUM  G:M=Price+Returns
-        "ETFs US"                   → B=Ticker  C=Name  D=AUM  F:L=Price+Returns
-        "Commodity ETFs"            → B=Ticker  C=Name  D=AUM  F:L=Price+Returns
-
-    ETFs India and Crypto are kept on the legacy YahooDataEngine (ETFdb
-    does not cover Indian exchange-listed ETFs or spot crypto tickers).
-    """
-
-    SCREENER_URL = "https://etfdb.com/api/screener/"
-
-    # Minimal headers — matching what the etfdb-api JS library sends.
-    # Extra browser-simulation headers (Sec-Fetch-*, Origin etc.) actually
-    # trigger ETFdb's bot detection. Keep it simple.
-    HEADERS = {
-        "Content-Type": "application/json",
-        "Accept":       "application/json",
-    }
-
-    # Per-sheet configuration
-    # Keys: sheet_name → (etfdb_type, n, start_row, ticker_col, name_col, aum_col, returns_col)
-    SHEET_CONFIGS = {
-        "Biggest Leveraged Funds ": {
-            "etfdb_type":  "Leveraged ETFs",
-            "n":           116,
-            "start_row":   7,
-            "ticker_col":  "A",
-            "name_col":    "B",
-            "aum_col":     "C",
-            "returns_col": "F",   # unchanged from existing layout
-        },
-        "Biggest Leveraged Funds(Com.)": {
-            # Commodity-focused leveraged ETFs — use Leveraged ETFs type;
-            # adjust etfdb_type to "Commodity ETFs" if you want non-leveraged.
-            "etfdb_type":  "Leveraged ETFs",
-            "n":           7,
-            "start_row":   5,
-            "ticker_col":  "A",
-            "name_col":    "B",
-            "aum_col":     "C",
-            "returns_col": "G",   # unchanged from existing layout
-            "no_sort":     True,
-        },
-        "ETFs US": {
-            "etfdb_type":  None,   # no type filter = all ETFs sorted by AUM
-            "n":           200,
-            "start_row":   3,
-            "ticker_col":  "B",
-            "name_col":    "C",
-            "aum_col":     "D",
-            "returns_col": "F",   # unchanged from existing layout
-        },
-        "Commodity ETFs": {
-            "etfdb_type":  "Commodity ETFs",
-            "n":           10,
-            "start_row":   4,
-            "ticker_col":  "B",
-            "name_col":    "C",
-            "aum_col":     "D",
-            "returns_col": "F",   # unchanged from existing layout
-        },
-    }
-
-    def __init__(self, sheet_client: GoogleSheetClient):
-        self.sheet_client = sheet_client
-
-    # ── ETFdb scrape ──────────────────────────────────────────
-
-    def _scrape(self, etf_type, n) -> list:
-        """
-        POST to ETFdb screener API and return a list of dicts:
-            [{"ticker": "TQQQ", "name": "ProShares UltraPro QQQ", "aum": "$21,300M"}, ...]
-        Sorted by AUM descending, limited to n results.
-
-        Payload matches the etfdb-api JS library exactly:
-          - only: ["meta", "data"] is required
-          - Minimal headers only — extra browser headers trigger bot detection
-        """
-        payload = {
-            "page":           1,
-            "per_page":       n,
-            "sort_by":        "assets",
-            "sort_direction": "desc",
-            "only":           ["meta", "data"],
-        }
-        if etf_type:
-            payload["type"] = etf_type
-
-        resp = requests.post(
-            self.SCREENER_URL,
-            json    = payload,
-            headers = self.HEADERS,
-            timeout = 30,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-
-        rows = []
-        for item in data.get("data", []):
-            sym    = item.get("symbol", "")
-            ticker = sym.get("text", "") if isinstance(sym, dict) else str(sym)
-
-            nm   = item.get("name", "")
-            name = nm.get("text", "") if isinstance(nm, dict) else str(nm)
-
-            aum = item.get("assets", "")
-
-            if ticker:
-                rows.append({"ticker": ticker.strip(), "name": name.strip(), "aum": aum})
-
-        return rows
-
-    # ── Sheet update ──────────────────────────────────────────
-
-    def _update_sheet(self, sheet_name: str, cfg: dict):
-        print(f"Updating {sheet_name} (ETFdb)...")
-
-        ws        = self.sheet_client.get_worksheet(sheet_name)
-        start_row = cfg["start_row"]
-        tc, nc, ac, rc = cfg["ticker_col"], cfg["name_col"], cfg["aum_col"], cfg["returns_col"]
-
-        # 1. Scrape ETFdb for ticker/name/AUM ─────────────────
-        # If ETFdb blocks (403) fall back to tickers already in the sheet
-        # so yfinance price/return updates still run normally.
-        etfs         = []
-        etfdb_ok     = False
-        scrape_error = None
-        try:
-            etfs     = self._scrape(cfg["etfdb_type"], cfg["n"])
-            etfdb_ok = bool(etfs)
-        except Exception as e:
-            scrape_error = e
-
-        if not etfdb_ok:
-            # Fall back: read existing tickers + names from sheet
-            print(f"  [WARN] ETFdb unavailable ({scrape_error or 'no results'}) "
-                  f"— using existing tickers from sheet for price update.")
-            end_row    = start_row + cfg["n"] - 1
-            sheet_rows = ws.get(f"{tc}{start_row}:{nc}{end_row}")
-            for r in sheet_rows:
-                ticker = r[0].strip() if len(r) > 0 else ""
-                name   = r[1].strip() if len(r) > 1 else ""
-                if ticker:
-                    etfs.append({"ticker": ticker, "name": name, "aum": ""})
-            if not etfs:
-                print(f"  [SKIP] No tickers in sheet either — skipping {sheet_name}.")
-                return
-        else:
-            # ETFdb worked — write fresh ticker/name/AUM to sheet
-            meta_values  = [[e["ticker"], e["name"], e["aum"]] for e in etfs]
-            blank        = ["", "", ""]
-            meta_values += [blank] * max(0, cfg["n"] + 10 - len(meta_values))
-            end_row      = start_row + len(meta_values) - 1
-            self.sheet_client.batch_update(ws, [{
-                "range":  f"{tc}{start_row}:{ac}{end_row}",
-                "values": meta_values,
-            }])
-
-        # 3. Fetch price + returns from yfinance ──────────────
-        symbols    = [e["ticker"] for e in etfs]
-        end_date   = datetime.now()
-        start_date = end_date - relativedelta(years=4)
-
-        data = yf.download(
-            symbols,
-            start       = start_date,
-            auto_adjust = True,
-            progress    = False,
-        )
-
-        start_col_idx  = ord(rc) - ord("A")
-        end_col_letter = chr(start_col_idx + 7 + ord("A"))
-
-        # Normalise DataFrame to {ticker: close_series} so the loop is uniform.
-        price_updates = []
-        for i, etf in enumerate(etfs):
-            row = start_row + i
-            try:
-                close_series = _extract_close(data, etf["ticker"], symbols)
-                if close_series is None or close_series.empty:
-                    raise ValueError(f"no data for {etf['ticker']}")
-                current_price = ReturnCalculator.last_confirmed_close(close_series)
-                returns       = ReturnCalculator.calculate(close_series, current_price)
-            except Exception as e:
-                print(f"  [WARN] {etf['ticker']} price fetch failed: {e}")
-                returns = ["NA"] * 8
-            price_updates.append({
-                "range":  f"{rc}{row}:{end_col_letter}{row}",
-                "values": [ReturnCalculator.clean(returns)],
-            })
-
-        self.sheet_client.batch_update(ws, price_updates)
-
-        # Sort by 5D performance (descending) unless disabled
-        if not cfg.get("no_sort"):
-            five_d_col = ord(rc) - ord('A') + 3  # 1-based column of 5D return
-            end_data_row = start_row + len(etfs) - 1
-            ws.sort((five_d_col, 'des'), range=f"A{start_row}:{end_col_letter}{end_data_row}")
-
-        price_as_of, updated_at = _make_metadata("US")
-        self.sheet_client.batch_update(ws, [
-            {"range": "A1", "values": [[price_as_of]]},
-            {"range": "A2", "values": [[updated_at]]},
-        ])
-
-        print(f"{sheet_name} (ETFdb) updated OK\n")
-
-    # ── Public entry point ────────────────────────────────────
-
-    def update_all(self):
-        """Update all ETFdb-backed sheets sequentially."""
-        for sheet_name, cfg in self.SHEET_CONFIGS.items():
-            try:
-                self._update_sheet(sheet_name, cfg)
-            except Exception as e:
-                print(f"  [ERROR] {sheet_name} ETFdb update failed: {e}")
 
 
 # ======================================================
@@ -1500,25 +1303,26 @@ class SP500SectorsEngine:
         )
 
         updates = []
+        end_col = chr(ord('K') + _EXTRA_COLS)
         for symbol, sheet_row in tickers:
             try:
                 close = _extract_close(data, symbol, symbols)
                 if close is None or close.empty:
                     raise ValueError(f"no data for {symbol}")
                 current_price = ReturnCalculator.last_confirmed_close(close)
-                returns       = ReturnCalculator.calculate(close, current_price)
+                returns       = ReturnCalculator.calculate(close, current_price, include_short_term=True)
             except Exception as e:
                 print(f"  [WARN] {symbol}: {e}")
-                returns = ["NA"] * 8
+                returns = ["NA"] * RETURN_COUNT_EXT
             updates.append({
-                "range":  f"D{sheet_row}:K{sheet_row}",
+                "range":  f"D{sheet_row}:{end_col}{sheet_row}",
                 "values": [ReturnCalculator.clean(returns)],
             })
 
         self.sheet_client.batch_update(ws, updates)
 
-        # Sort by 5D performance (col F = 6, descending)
-        ws.sort((6, 'des'), range="A4:K14")
+        # Sort by 5D performance — col F (=6) normally, shifts +3 with temp cols
+        ws.sort((6 + _EXTRA_COLS, 'des'), range=f"A4:{end_col}14")
 
         price_as_of, updated_at = _make_metadata("US")
         self.sheet_client.batch_update(ws, [
@@ -1527,6 +1331,145 @@ class SP500SectorsEngine:
         ])
 
         print("S&P500 Sectors updated OK\n")
+
+
+# ======================================================
+# MANUAL ETF SHEETS — PRICE/RETURNS REFRESH + 5D SORT
+# ======================================================
+
+class ManualETFEngine:
+    """
+    Refreshes price + return columns for the manually-maintained ETF sheets
+    using yfinance, then sorts each sheet by 5D performance descending
+    (except where no_sort=True). Tickers / names / AUM are left alone — the
+    user owns those columns.
+
+    Layout per sheet (returns_col is the Price cell; the next 7 cols hold
+    1D, 5D, 1M, 3M, 6M, 1Y, 3Y returns; 5D sits in returns_col + 2):
+        "Biggest Leveraged Funds "      ticker A, returns F  (F..M)  sort A:M
+        "Biggest Leveraged Funds(Com.)" ticker A, returns G  (G..N)  no sort
+        "ETFs US"                       ticker B, returns F  (F..M)  sort A:M
+        "Commodity ETFs"                ticker B, returns F  (F..M)  sort A:M
+    """
+
+    SHEET_CONFIGS = {
+        "Biggest Leveraged Funds ": {
+            "start_row":   7,
+            "end_row":     122,
+            "ticker_col":  "A",
+            "returns_col": "F",
+            "no_sort":     False,
+            "market":      "US",
+        },
+        "Biggest Leveraged Funds(Com.)": {
+            "start_row":   5,
+            "end_row":     11,
+            "ticker_col":  "A",
+            "returns_col": "G",
+            "no_sort":     True,
+            "market":      "US",
+        },
+        "ETFs US": {
+            "start_row":   3,
+            "end_row":     202,
+            "ticker_col":  "B",
+            "returns_col": "F",
+            "no_sort":     False,
+            "market":      "US",
+        },
+        "Commodity ETFs": {
+            "start_row":   4,
+            "end_row":     13,
+            "ticker_col":  "B",
+            "returns_col": "F",
+            "no_sort":     False,
+            "market":      "US",
+        },
+    }
+
+    def __init__(self, sheet_client: GoogleSheetClient):
+        self.sheet_client = sheet_client
+
+    def _update_sheet(self, sheet_name: str, cfg: dict):
+        print(f"Updating {sheet_name} (manual)...")
+
+        ws        = self.sheet_client.get_worksheet(sheet_name)
+        start_row = cfg["start_row"]
+        end_row   = cfg["end_row"]
+        tc        = cfg["ticker_col"]
+        rc        = cfg["returns_col"]
+
+        # 1. Read tickers already in the sheet ────────────────
+        ticker_rows = ws.get(f"{tc}{start_row}:{tc}{end_row}")
+        tickers = []  # [(sheet_row, ticker), ...]
+        for i in range(end_row - start_row + 1):
+            cell = ticker_rows[i] if i < len(ticker_rows) else []
+            t = cell[0].strip() if cell and len(cell) > 0 else ""
+            if t:
+                tickers.append((start_row + i, t))
+
+        if not tickers:
+            print(f"  [SKIP] No tickers found in {sheet_name}.")
+            return
+
+        # 2. Batch download price history from yfinance ──────
+        symbols    = [t for _, t in tickers]
+        end_date   = datetime.now()
+        start_date = end_date - relativedelta(years=4)
+
+        data = yf.download(
+            symbols,
+            start       = start_date,
+            auto_adjust = True,
+            progress    = False,
+        )
+
+        # 3. Build per-row return updates ─────────────────────
+        start_col_idx  = ord(rc) - ord("A")
+        end_col_letter = chr(start_col_idx + 7 + ord("A"))
+
+        price_updates = []
+        for sheet_row, ticker in tickers:
+            try:
+                close_series = _extract_close(data, ticker, symbols)
+                if close_series is None or close_series.empty:
+                    raise ValueError(f"no data for {ticker}")
+                current_price = ReturnCalculator.last_confirmed_close(close_series)
+                returns       = ReturnCalculator.calculate(close_series, current_price)
+            except Exception as e:
+                print(f"  [WARN] {ticker} price fetch failed: {e}")
+                returns = ["NA"] * 8
+            price_updates.append({
+                "range":  f"{rc}{sheet_row}:{end_col_letter}{sheet_row}",
+                "values": [ReturnCalculator.clean(returns)],
+            })
+
+        self.sheet_client.batch_update(ws, price_updates)
+
+        # 4. Sort by 5D return desc (unless disabled) ─────────
+        if not cfg["no_sort"]:
+            five_d_col   = start_col_idx + 3            # 1-based col of 5D
+            end_data_row = start_row + len(tickers) - 1
+            ws.sort(
+                (five_d_col, "des"),
+                range=f"A{start_row}:{end_col_letter}{end_data_row}",
+            )
+
+        # 5. Update metadata cells ────────────────────────────
+        price_as_of, updated_at = _make_metadata(cfg["market"])
+        self.sheet_client.batch_update(ws, [
+            {"range": "A1", "values": [[price_as_of]]},
+            {"range": "A2", "values": [[updated_at]]},
+        ])
+
+        print(f"{sheet_name} (manual) updated OK\n")
+
+    def update_all(self):
+        for sheet_name, cfg in self.SHEET_CONFIGS.items():
+            try:
+                self._update_sheet(sheet_name, cfg)
+            except Exception as e:
+                print(f"  [ERROR] {sheet_name} manual update failed: {e}")
 
 
 # ======================================================
@@ -1547,19 +1490,19 @@ class MarketUpdater:
         self.config         = Config()
         self.sheet_client   = GoogleSheetClient(self.config)
         self.yahoo          = YahooDataEngine(self.sheet_client)
-        self.etfdb          = ETFdbEngine(self.sheet_client)
         self.zerodha        = ZerodhaDataEngine(self.config, self.sheet_client)
         self.global_indices = GlobalIndicesEngine(self.sheet_client)
         self.mutual_funds   = MutualFundsEngine(self.sheet_client)
         self.sp500_sectors  = SP500SectorsEngine(self.sheet_client)
+        self.manual_etf     = ManualETFEngine(self.sheet_client)
 
     def _global_indices_overrides(self) -> dict:
         """Fetch returns from Zerodha for indices shared with NIFTY tabs."""
         overrides = {}
         for zerodha_ticker, yf_symbol in self._ZERODHA_GLOBAL_OVERRIDES.items():
             try:
-                returns = self.zerodha.get_returns(zerodha_ticker)
-                if returns and returns != ["NA"] * 8:
+                returns = self.zerodha.get_returns(zerodha_ticker, include_short_term=True)
+                if returns and returns != ["NA"] * RETURN_COUNT_EXT:
                     overrides[yf_symbol] = returns
                     print(f"  Global Indices override: {zerodha_ticker} → {yf_symbol} (Zerodha)")
             except Exception as e:
@@ -1577,9 +1520,10 @@ class MarketUpdater:
             "NIFTY Sectors":                self.zerodha.update_nifty_sectors,
             "NIFTY Indices":                self.zerodha.update_nifty_indices,
             "NIFTY500Moment.50":            self.yahoo.update_nifty_momentum_50,
+            "Manual ETF Sheets":            self.manual_etf.update_all,
             **{
-                name: (lambda n, c: lambda: self.etfdb._update_sheet(n, c))(name, cfg)
-                for name, cfg in ETFdbEngine.SHEET_CONFIGS.items()
+                name: (lambda n, c: lambda: self.manual_etf._update_sheet(n, c))(name, cfg)
+                for name, cfg in ManualETFEngine.SHEET_CONFIGS.items()
             },
         }
 
@@ -1617,8 +1561,8 @@ class MarketUpdater:
                 ("Crypto",             lambda: self.yahoo.update_sheet("Crypto", "B104:B118", 104, "D")),
                 ("Global Indices",     self.global_indices.update_global_indices),
                 ("S&P500 Sectors",     self.sp500_sectors.update_sp500_sectors),
-                ("ETFdb Sheets",       self.etfdb.update_all),
                 ("NIFTY500Moment.50",  self.yahoo.update_nifty_momentum_50),
+                ("Manual ETF Sheets",  self.manual_etf.update_all),
             ]:
                 try:
                     fn()
@@ -1628,7 +1572,7 @@ class MarketUpdater:
         # Zerodha (Kite API) and Mutual Funds (mfapi.in) are fully independent
         # of yfinance and can run concurrently alongside the yfinance block.
         tasks = [
-            ("yfinance + ETFdb", run_yfinance_sequential),
+            ("yfinance",         run_yfinance_sequential),
             ("Mutual Funds",     self.mutual_funds.update_mutual_funds),
             ("NIFTY Sectors",    self.zerodha.update_nifty_sectors),
             ("NIFTY Indices",    self.zerodha.update_nifty_indices),
