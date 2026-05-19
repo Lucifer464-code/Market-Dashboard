@@ -131,40 +131,52 @@ def load_stocks_metadata(sheet_name: str) -> tuple:
     return price_as_of, updated_at
 
 
+# TEMP: 2D/3D/4D columns were added to the sheet between 1D and 5D.
+# The dashboard hides them by dropping them after read. Delete this helper
+# and the calls below when reverting the temporary column insertion.
+_TEMP_SHORT_TERM_COLS = ("2D", "3D", "4D")
+
+def _drop_short_term_cols(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    cols_to_drop = [c for c in df.columns if c.strip() in _TEMP_SHORT_TERM_COLS]
+    return df.drop(columns=cols_to_drop) if cols_to_drop else df
+
+
 # ── Section loaders ───────────────────────────────────────
 
 @st.cache_data(ttl=28800)
 def load_sp500_sectors():
     ws = _ws("S&P500 Sectors")
-    return _range_to_df(ws, "B3:K14")
+    return _drop_short_term_cols(_range_to_df(ws, "B3:N14"))
 
 
 @st.cache_data(ttl=28800)
 def load_global_indices():
     ws = _ws("Global Indices")
-    t1 = _range_to_df(ws, "B4:K17")
-    t2 = _range_to_df(ws, "B22:K80")
+    t1 = _drop_short_term_cols(_range_to_df(ws, "B4:N17"))
+    t2 = _drop_short_term_cols(_range_to_df(ws, "B22:N80"))
     return t1, t2
 
 
 @st.cache_data(ttl=28800)
 def load_nifty_indices():
     ws = _ws("NIFTY Indices")
-    t1 = _range_to_df(ws, "B3:L17", keep_blank_cols=True)
-    t2 = _range_to_df(ws, "B20:L28", keep_blank_cols=True)
+    t1 = _drop_short_term_cols(_range_to_df(ws, "B3:O17", keep_blank_cols=True))
+    t2 = _drop_short_term_cols(_range_to_df(ws, "B20:O28", keep_blank_cols=True))
     return t1, t2
 
 
 @st.cache_data(ttl=28800)
 def load_nifty_sectors():
     ws = _ws("NIFTY Sectors")
-    return _range_to_df(ws, "B3:L17", keep_blank_cols=True)
+    return _drop_short_term_cols(_range_to_df(ws, "B3:O17", keep_blank_cols=True))
 
 
 @st.cache_data(ttl=28800)
 def load_nifty_momentum_50():
     ws = _ws("NIFTY500Moment.50")
-    return _range_to_df(ws, "B4:L54")
+    return _drop_short_term_cols(_range_to_df(ws, "B4:O54"))
 
 
 @st.cache_data(ttl=28800)
