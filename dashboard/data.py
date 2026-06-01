@@ -39,6 +39,7 @@ def _ws(name: str):
 
 def _fetch_links(sheet_title: str, range_str: str) -> list[str | None]:
     """Return per-row hyperlinks for the FIRST column of `range_str`.
+    Pass a single-column range (e.g. 'B3:B17') to fetch links for that column.
     Length matches the row span of the range. Cells without a hyperlink
     return None.
     """
@@ -141,47 +142,50 @@ def _range_to_df(ws, range_str: str, header_idx: int | None = None,
     return df
 
 
-def _attach_first_col_links(df: pd.DataFrame, sheet_title: str, range_str: str,
-                            header_idx: int = 0) -> pd.DataFrame:
-    """Augment `df` with a sidecar `__link__<col0>` column carrying the URL
-    for each first-column cell. Aligns by skipping the same blank rows
-    `_range_to_df` skipped, so a hyperlink stays with its row even after
-    sort/drop downstream.
-    `range_str` must match what was passed to `_range_to_df`.
+def _attach_col_links(df: pd.DataFrame, sheet_title: str, full_range: str,
+                      link_cols: list[tuple[str, str]],
+                      header_idx: int = 0) -> pd.DataFrame:
+    """Augment `df` with one sidecar `__link__<header>` column per entry in
+    `link_cols`. Each entry is (sheet_column_letter, df_header_name) — the
+    sheet column whose hyperlinks should populate the sidecar for the given
+    DataFrame column.
+
+    `full_range` is the range that was passed to `_range_to_df` (e.g.
+    'B3:M17') — used only to determine which sheet rows correspond to which
+    DataFrame rows after blank-row filtering.
     """
-    if df.empty:
+    if df.empty or not link_cols:
         return df
 
-    links = _fetch_links(sheet_title, range_str)
-    # links[i] corresponds to the i-th row of the range.
-    # Drop the header rows (range starts at header_idx in _range_to_df logic;
-    # however the public callers always pass full range starting at the header).
-    # Skip the header line(s) up to and including header_idx.
-    data_links = links[header_idx + 1:]
-
-    # _range_to_df drops fully-empty rows. We mirror that by walking the raw
-    # values again so the link list aligns with df's rows. To avoid a second
-    # network call we use df's row count as the source of truth: take the
-    # first len(df) non-None-text indices. Simpler: re-fetch the formatted
-    # values once and walk both lists in lockstep.
+    # Re-fetch the full range's text once so we can detect blank rows the
+    # same way `_range_to_df` did, keeping link rows aligned with df rows.
     ws = _ws(sheet_title)
-    raw_values = ws.get(range_str)
-    raw_values = raw_values[header_idx + 1:]   # drop header line(s)
+    raw_values = ws.get(full_range)[header_idx + 1:]   # drop header line
 
-    aligned: list[str | None] = []
-    for row, link in zip(raw_values, data_links):
-        # _range_to_df keeps a row if any cell has non-empty text
-        if any(str(c).strip() for c in row):
-            aligned.append(link)
-        if len(aligned) == len(df):
-            break
+    # Derive the row span from the full range (e.g. "B3:M17" -> rows 3..17)
+    import re
+    m = re.match(r"^([A-Za-z]+)(\d+):([A-Za-z]+)(\d+)$", full_range.strip())
+    if not m:
+        return df
+    start_row = int(m.group(2)) + header_idx + 1
+    end_row   = int(m.group(4))
 
-    while len(aligned) < len(df):
-        aligned.append(None)
-
-    first_col = df.columns[0]
     df = df.copy()
-    df[f"__link__{first_col}"] = aligned
+    for sheet_col, df_header in link_cols:
+        col_range = f"{sheet_col}{start_row}:{sheet_col}{end_row}"
+        links = _fetch_links(sheet_title, col_range)
+
+        aligned: list[str | None] = []
+        for row, link in zip(raw_values, links):
+            if any(str(c).strip() for c in row):
+                aligned.append(link)
+            if len(aligned) == len(df):
+                break
+        while len(aligned) < len(df):
+            aligned.append(None)
+
+        df[f"__link__{df_header}"] = aligned
+
     return df
 
 
@@ -231,18 +235,22 @@ def load_global_indices():
 @st.cache_data(ttl=28800)
 def load_nifty_indices():
     ws = _ws("NIFTY Indices")
-    t1 = _range_to_df(ws, "B3:L17", keep_blank_cols=True)
-    t2 = _range_to_df(ws, "B20:L28", keep_blank_cols=True)
-    t1 = _attach_first_col_links(t1, "NIFTY Indices", "B3:L17")
-    t2 = _attach_first_col_links(t2, "NIFTY Indices", "B20:L28")
+    t1 = _range_to_df(ws, "B3:M17", keep_blank_cols=True)
+    t2 = _range_to_df(ws, "B20:M28", keep_blank_cols=True)
+    # Attach hyperlinks for the Index Name col (B) and the Tradingview col (M)
+    t1_links = [("B", t1.columns[0]), ("M", "Tradingview")] if not t1.empty else []
+    t2_links = [("B", t2.columns[0]), ("M", "Tradingview")] if not t2.empty else []
+    t1 = _attach_col_links(t1, "NIFTY Indices", "B3:M17", t1_links)
+    t2 = _attach_col_links(t2, "NIFTY Indices", "B20:M28", t2_links)
     return t1, t2
 
 
 @st.cache_data(ttl=28800)
 def load_nifty_sectors():
     ws = _ws("NIFTY Sectors")
-    df = _range_to_df(ws, "B3:L17", keep_blank_cols=True)
-    return _attach_first_col_links(df, "NIFTY Sectors", "B3:L17")
+    df = _range_to_df(ws, "B3:M17", keep_blank_cols=True)
+    links = [("B", df.columns[0]), ("M", "Tradingview")] if not df.empty else []
+    return _attach_col_links(df, "NIFTY Sectors", "B3:M17", links)
 
 
 @st.cache_data(ttl=28800)
