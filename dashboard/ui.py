@@ -143,12 +143,21 @@ def render_stat_cards(df: pd.DataFrame, secondary_df: pd.DataFrame | None = None
 
 def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bool = True,
                  fixed_height: bool = False, cell_color_map: dict | None = None):
-    """Render a sortable HTML table with red centered headers."""
+    """Render a sortable HTML table with red centered headers.
+    Columns named "__link__<header>" are treated as hyperlink sidecars for
+    the column named <header>; they are not displayed, but their values
+    wrap the corresponding cell content in an <a> tag.
+    """
     if df.empty:
         st.info("No data available.")
         return
 
-    pct_cols = set(_pct_cols(df))
+    # Map visible col → sidecar col for hyperlink lookup (__link__<header>)
+    link_prefix = "__link__"
+    link_for    = {c[len(link_prefix):]: c for c in df.columns if c.startswith(link_prefix)}
+    visible_cols = [c for c in df.columns if not c.startswith(link_prefix)]
+
+    pct_cols = set(_pct_cols(df[visible_cols]))
 
     def _is_numeric_col(col):
         def _ok(v):
@@ -159,12 +168,12 @@ def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bo
                 return False
         return df[col].apply(_ok).mean() > 0.5
 
-    numeric_cols = {col for col in df.columns if _is_numeric_col(col)}
+    numeric_cols = {col for col in visible_cols if _is_numeric_col(col)}
 
     header_cells = "".join(
         f'<th onclick="sortTable({i})" data-col="{i}">'
         f'{col}<span class="sort-icon">⇅</span></th>'
-        for i, col in enumerate(df.columns)
+        for i, col in enumerate(visible_cols)
     )
 
     def _fmt(val):
@@ -183,7 +192,7 @@ def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bo
     rows_html = ""
     for _, row in df.iterrows():
         cells = ""
-        for j, col in enumerate(df.columns):
+        for j, col in enumerate(visible_cols):
             val = row[col]
             display = _fmt(val) if col in numeric_cols else val
             align = "center" if col in numeric_cols else "left"
@@ -193,6 +202,14 @@ def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bo
                 if mapped:
                     extra = f"color:{mapped};font-weight:600;"
             bold = "font-weight:700;" if (j == 0 and bold_first_col) else ""
+            sidecar = link_for.get(col)
+            link = row[sidecar] if sidecar is not None else None
+            if link:
+                display = (
+                    f'<a href="{link}" target="_blank" rel="noopener noreferrer" '
+                    f'style="color:inherit;text-decoration:underline;'
+                    f'text-decoration-color:#94a3b8;text-underline-offset:2px">{display}</a>'
+                )
             cells += f'<td style="text-align:{align};{bold}{extra}">{display}</td>'
         rows_html += f"<tr>{cells}</tr>"
 

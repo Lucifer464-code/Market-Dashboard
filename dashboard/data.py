@@ -8,6 +8,7 @@ The service account JSON is read from st.secrets["GOOGLE_SERVICE_ACCOUNT"].
 import gspread
 import pandas as pd
 import streamlit as st
+from google.auth.transport.requests import AuthorizedSession
 from google.oauth2.service_account import Credentials
 
 SHEET_ID = "1uJoD2JRvzRpn2KHJa80aZADQ2DfRwm2qbZKMuv0PKBM"
@@ -23,8 +24,44 @@ def _client():
     return gspread.authorize(creds)
 
 
+@st.cache_resource
+def _http_session():
+    """Authorized HTTP session for direct Sheets v4 API calls (needed for
+    hyperlink metadata, which gspread.get() strips)."""
+    info  = dict(st.secrets["GOOGLE_SERVICE_ACCOUNT"])
+    creds = Credentials.from_service_account_info(info, scopes=SCOPES)
+    return AuthorizedSession(creds)
+
+
 def _ws(name: str):
     return _client().open_by_key(SHEET_ID).worksheet(name)
+
+
+def _fetch_links(sheet_title: str, range_str: str) -> list[str | None]:
+    """Return per-row hyperlinks for the FIRST column of `range_str`.
+    Length matches the row span of the range. Cells without a hyperlink
+    return None.
+    """
+    url = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}"
+    resp = _http_session().get(
+        url,
+        params={
+            "ranges": f"'{sheet_title}'!{range_str}",
+            "includeGridData": "true",
+            "fields": "sheets(data(rowData(values(hyperlink))))",
+        },
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    try:
+        rows = data["sheets"][0]["data"][0].get("rowData", [])
+    except (KeyError, IndexError):
+        return []
+    out: list[str | None] = []
+    for row in rows:
+        cells = row.get("values") or [{}]
+        out.append(cells[0].get("hyperlink"))
+    return out
 
 
 # ── Range → DataFrame ─────────────────────────────────────
@@ -104,6 +141,50 @@ def _range_to_df(ws, range_str: str, header_idx: int | None = None,
     return df
 
 
+def _attach_first_col_links(df: pd.DataFrame, sheet_title: str, range_str: str,
+                            header_idx: int = 0) -> pd.DataFrame:
+    """Augment `df` with a sidecar `__link__<col0>` column carrying the URL
+    for each first-column cell. Aligns by skipping the same blank rows
+    `_range_to_df` skipped, so a hyperlink stays with its row even after
+    sort/drop downstream.
+    `range_str` must match what was passed to `_range_to_df`.
+    """
+    if df.empty:
+        return df
+
+    links = _fetch_links(sheet_title, range_str)
+    # links[i] corresponds to the i-th row of the range.
+    # Drop the header rows (range starts at header_idx in _range_to_df logic;
+    # however the public callers always pass full range starting at the header).
+    # Skip the header line(s) up to and including header_idx.
+    data_links = links[header_idx + 1:]
+
+    # _range_to_df drops fully-empty rows. We mirror that by walking the raw
+    # values again so the link list aligns with df's rows. To avoid a second
+    # network call we use df's row count as the source of truth: take the
+    # first len(df) non-None-text indices. Simpler: re-fetch the formatted
+    # values once and walk both lists in lockstep.
+    ws = _ws(sheet_title)
+    raw_values = ws.get(range_str)
+    raw_values = raw_values[header_idx + 1:]   # drop header line(s)
+
+    aligned: list[str | None] = []
+    for row, link in zip(raw_values, data_links):
+        # _range_to_df keeps a row if any cell has non-empty text
+        if any(str(c).strip() for c in row):
+            aligned.append(link)
+        if len(aligned) == len(df):
+            break
+
+    while len(aligned) < len(df):
+        aligned.append(None)
+
+    first_col = df.columns[0]
+    df = df.copy()
+    df[f"__link__{first_col}"] = aligned
+    return df
+
+
 # ── Last updated ──────────────────────────────────────────
 
 @st.cache_data(ttl=28800)
@@ -152,13 +233,16 @@ def load_nifty_indices():
     ws = _ws("NIFTY Indices")
     t1 = _range_to_df(ws, "B3:L17", keep_blank_cols=True)
     t2 = _range_to_df(ws, "B20:L28", keep_blank_cols=True)
+    t1 = _attach_first_col_links(t1, "NIFTY Indices", "B3:L17")
+    t2 = _attach_first_col_links(t2, "NIFTY Indices", "B20:L28")
     return t1, t2
 
 
 @st.cache_data(ttl=28800)
 def load_nifty_sectors():
     ws = _ws("NIFTY Sectors")
-    return _range_to_df(ws, "B3:L17", keep_blank_cols=True)
+    df = _range_to_df(ws, "B3:L17", keep_blank_cols=True)
+    return _attach_first_col_links(df, "NIFTY Sectors", "B3:L17")
 
 
 @st.cache_data(ttl=28800)
