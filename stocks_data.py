@@ -127,6 +127,14 @@ class StocksDataEngine:
         "https://nsearchives.nseindia.com/content/indices/ind_niftytotalmarket_list.csv"
     )
 
+    # ── Manual additions ──────────────────────────────────────
+    # Recently-listed stocks not yet in NSE's index constituent CSV
+    # (NSE only updates it on periodic reconstitution). Merged into the
+    # universe so they appear on the dashboard. {SYMBOL: Company Name}.
+    IN_MANUAL_ADDITIONS = {
+        "SEDEMAC": "SEDEMAC Mechatronics Ltd.",
+    }
+
     # ── Market cap floors ─────────────────────────────────────
     US_MCAP_FLOOR = 2_000_000_000    # $2 Bn in USD
     IN_MCAP_FLOOR = 5_000_000_000    # Rs500 Cr in INR
@@ -328,6 +336,12 @@ class StocksDataEngine:
             ))
 
             tickers = (df["Symbol"] + ".NS").tolist()
+
+            # Merge manual additions for stocks NSE hasn't added to the index yet
+            for sym, name in self.IN_MANUAL_ADDITIONS.items():
+                if sym not in name_map:
+                    name_map[sym] = name
+                    tickers.append(f"{sym}.NS")
 
             print(f"  NIFTY Total Market: {len(tickers)} tickers, {len(name_map)} names loaded from CSV")
             self._save_pkl_cache(self.IN_CACHE_FILE, (tickers, name_map))
