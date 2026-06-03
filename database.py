@@ -652,6 +652,10 @@ class ZerodhaDataEngine:
         "NIFTY IND DEFENCE":   "NIFTY INDIA DEFENCE",
         "NIFTY INDIA DEFENCE": "NIFTY INDIA DEFENCE",
         "NIFTY DEFENCE":       "NIFTY INDIA DEFENCE",
+        "NIFTY MS IT TELCM":   "NIFTY MIDSMALL IT & TELECOM",
+        "NIFTY MS FIN SERV":   "NIFTY MIDSMALL FINANCIAL SERVICES",
+        "NIFTY TOTAL MKT":     "NIFTY TOTAL MARKET",
+        "NIFTY500MOMENTM50":   "NIFTY500 MOMENTUM 50",
     }
 
     def _fetch_nse_pe_map(self) -> dict:
@@ -733,9 +737,10 @@ class ZerodhaDataEngine:
 
         self.sheet_client.batch_update(worksheet, updates)
 
-        # Sort each table section by 5D performance (col G = 7 after PE insert, descending)
-        worksheet.sort((7, 'des'), range="A4:L17")
-        worksheet.sort((7, 'des'), range="A21:L28")
+        # Sort each table section by 5D performance (col G = 7 after PE insert, descending).
+        # Range extends to col M so the Tradingview column moves with its row.
+        worksheet.sort((7, 'des'), range="A4:M17")
+        worksheet.sort((7, 'des'), range="A21:M28")
 
         price_as_of, updated_at = _make_metadata("IN")
         self.sheet_client.batch_update(worksheet, [
@@ -786,8 +791,9 @@ class ZerodhaDataEngine:
 
         self.sheet_client.batch_update(worksheet, updates)
 
-        # Sort by 5D performance (col G = 7 after PE insert, descending)
-        worksheet.sort((7, 'des'), range="A4:L17")
+        # Sort by 5D performance (col G = 7 after PE insert, descending).
+        # Range extends to col M so the Tradingview column moves with its row.
+        worksheet.sort((7, 'des'), range="A4:M17")
 
         price_as_of, updated_at = _make_metadata("IN")
         self.sheet_client.batch_update(worksheet, [
