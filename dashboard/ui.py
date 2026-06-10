@@ -11,7 +11,7 @@ RED   = "#ea4335"
 
 _NAV_GROUPS = {
     "MARKETS": ["Global Indices", "Additional Global Indices", "NIFTY Sectoral Indices", "Additional NIFTY Sectoral Indices", "Broad Market Indices", "NIFTY 500 Momentum 50", "S&P 500 Sectors"],
-    "FUNDS":   ["ETFs US", "Leveraged Funds", "ETFs India", "Mutual Funds India"],
+    "FUNDS":   ["ETFs US", "Leveraged Funds", "ETFs India", "Commodity ETFs", "Leveraged Commodity Funds", "Mutual Funds India"],
     "CRYPTO":  ["Crypto"],
     "STOCKS":  ["Gainers & Losers US", "Gainers & Losers India", "ATH US", "ATH India"],
     "INSTITUTIONAL INVESTORS": ["Hedge Funds", "Top Hedge Fund Investments", "Indian Investors"],

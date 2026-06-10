@@ -290,6 +290,20 @@ def load_etfs_india():
 
 
 @st.cache_data(ttl=28800)
+def load_commodity_etfs():
+    ws = _ws("Commodity ETFs")
+    # Header row 3, data from row 4. Generous lower bound so new rows appear.
+    return _range_to_df(ws, "B3:N40", header_idx=0)
+
+
+@st.cache_data(ttl=28800)
+def load_leveraged_commodity_funds():
+    ws = _ws("Biggest Leveraged Funds(Com.)")
+    # Header row 4, data from row 5. Generous lower bound so new rows appear.
+    return _range_to_df(ws, "A4:N40", header_idx=0)
+
+
+@st.cache_data(ttl=28800)
 def load_crypto():
     ws = _ws("Crypto")
     return _range_to_df(ws, "A103:K118", header_idx=0)

@@ -243,10 +243,12 @@ NAV = {
         ("S&P 500 Sectors",                   "S&P 500 Sectors"),
     ],
     "FUNDS": [
-        ("ETFs US",            "ETFs US"),
-        ("Leveraged Funds",    "Leveraged Funds"),
-        ("ETFs India",         "ETFs India"),
-        ("Mutual Funds India", "Mutual Funds India"),
+        ("ETFs US",                    "ETFs US"),
+        ("Leveraged Funds",            "Leveraged Funds"),
+        ("ETFs India",                 "ETFs India"),
+        ("Commodity ETFs",             "Commodity ETFs"),
+        ("Leveraged Commodity Funds",  "Leveraged Commodity Funds"),
+        ("Mutual Funds India",         "Mutual Funds India"),
     ],
     "CRYPTO": [
         ("Crypto", "Crypto"),
@@ -431,6 +433,28 @@ elif section == "ETFs India":
                       price_as_of=price_as_of)
     df = df.drop(df.columns[1], axis=1)
     ui.render_table(df, bold_first_col=False)
+
+elif section == "Commodity ETFs":
+    df = data.load_commodity_etfs()
+    price_as_of, _ = data.load_stocks_metadata("Commodity ETFs")
+    ui.section_header("Commodity ETFs", "Metals & commodity ETFs by exposure",
+                      price_as_of=price_as_of)
+    # Drop the duplicate exchange-qualified Ticker column (col index 3: Metal? no)
+    # Columns: Ticker, ETF name, Metal, Ticker(exch), Price, 1D, 5D, ... — drop col 3
+    df = df.drop(df.columns[3], axis=1)
+    df = ui.sort_by_keyword(df, "5d")
+    ui.render_table(df, bold_first_col=False)
+
+elif section == "Leveraged Commodity Funds":
+    df = data.load_leveraged_commodity_funds()
+    price_as_of, _ = data.load_stocks_metadata("Biggest Leveraged Funds(Com.)")
+    ui.section_header("Leveraged Commodity Funds", "Biggest leveraged commodity ETFs",
+                      price_as_of=price_as_of)
+    # Columns: Ticker, Name, Leverage, Commodity, AUM(USD numeric), AUM (fmt), ...
+    # Drop the redundant numeric AUM column (index 4); keep Commodity + formatted AUM.
+    if len(df.columns) > 4:
+        df = df.drop(df.columns[4], axis=1)
+    ui.render_table(df)
 
 elif section == "Crypto":
     df = data.load_crypto()
