@@ -376,36 +376,39 @@ class YahooDataEngine:
 
     def update_nifty_momentum_50(self):
         """
-        Fetch NIFTY 500 Momentum 50 stock data.
+        Fetch NIFTY 500 Momentum 50 return data.
 
-        Reads 50 company names from B5:B54 (IMPORTHTML), reverse-looks-up NSE
-        tickers via ticker_names.csv, then writes per stock:
-            C : Market Cap (in crores, no suffix)
-            D : Trailing P/E ratio
-            E : Current price
-            F–L : 1D, 5D, 1M, 3M, 6M, 1Y, 3Y returns (%)
-        Row order preserved as the NSE-provided momentum ranking (no sort).
+        Reads the consolidated company list from O5 downward (the raw Screener
+        import in C–L is paginated with interleaved headers/footers; O is the
+        clean, de-duplicated list), reverse-looks-up NSE tickers via
+        ticker_names.csv, then writes the 7 trailing returns per stock:
+            R–X : 1D, 5D, 1M, 3M, 6M, 1Y, 3Y returns (%)
+        Market cap, P/E and CMP are sourced externally (cols C–L / O–Q) and
+        are NOT written here. Row order preserved as the momentum ranking.
         """
         sheet_name = "NIFTY500Moment.50"
         print(f"Updating {sheet_name}...")
 
         worksheet = self.sheet_client.get_worksheet(sheet_name)
-        name_rows = worksheet.get("B5:B54")
+        # O column is the clean company list; read a generous range and stop at
+        # the first blank so we adapt to however many constituents are present.
+        name_rows = worksheet.get("O5:O60")
 
         name_to_ticker = self._load_name_to_ticker()
 
         resolved = []  # [(sheet_row, ticker)]
-        for i in range(50):
-            name   = name_rows[i][0].strip() if i < len(name_rows) and name_rows[i] else ""
-            ticker = self._resolve_indian_ticker(name, name_to_ticker) if name else ""
+        for i, r in enumerate(name_rows):
+            name = r[0].strip() if r else ""
+            if not name:
+                break   # blank row = end of list
+            ticker = self._resolve_indian_ticker(name, name_to_ticker)
             resolved.append((5 + i, ticker))
-            if name and not ticker:
+            if not ticker:
                 print(f"  [WARN] No ticker match for '{name}'")
 
-        # Default NA for all rows (overwritten below where data is fetched)
-        mcap_values   = {row: "NA"       for row, _ in resolved}  # col C
-        pe_values     = {row: "NA"       for row, _ in resolved}  # col D
-        return_values = {row: ["NA"] * 8 for row, _ in resolved}  # cols E:L
+        # Default NA for all rows (overwritten below where data is fetched).
+        # 7 returns per row: 1D, 5D, 1M, 3M, 6M, 1Y, 3Y (cols R:X).
+        return_values = {row: ["NA"] * 7 for row, _ in resolved}
 
         tickers_with_rows = [(t + ".NS", r) for r, t in resolved if t]
 
@@ -422,30 +425,6 @@ class YahooDataEngine:
                 progress    = False,
             )
 
-            # Market cap + P/E (parallel via yf.Ticker.info)
-            def _get_fundamentals(symbol):
-                for attempt in range(3):
-                    try:
-                        info = yf.Ticker(symbol).info
-                        mcap = info.get("marketCap")
-                        pe   = info.get("trailingPE")
-                        return (
-                            symbol,
-                            float(mcap) if mcap else None,
-                            float(pe)   if pe   else None,
-                        )
-                    except Exception:
-                        if attempt < 2:
-                            time.sleep(1 + attempt)
-                return symbol, None, None
-
-            print(f"  Fetching market cap + P/E for {len(symbols)} tickers...")
-            fundamentals = {}
-            with ThreadPoolExecutor(max_workers=8) as pool:
-                for sym, mcap, pe in pool.map(_get_fundamentals, symbols):
-                    fundamentals[sym] = (mcap, pe)
-
-            # Combine per-ticker results into row-level values
             for symbol, sheet_row in tickers_with_rows:
                 try:
                     close_series = _extract_close(price_data, symbol, symbols)
@@ -453,22 +432,22 @@ class YahooDataEngine:
                         raise ValueError(f"no price data for {symbol}")
                     current_price = ReturnCalculator.last_confirmed_close(close_series)
                     returns       = ReturnCalculator.calculate(close_series, current_price)
-                    return_values[sheet_row] = ReturnCalculator.clean(returns)
+                    # calculate() -> [price, 1D, 5D, 1M, 3M, 6M, 1Y, 3Y]; drop price.
+                    return_values[sheet_row] = ReturnCalculator.clean(returns[1:])
                 except Exception as e:
                     print(f"  [WARN] {symbol} price fetch failed: {e}")
 
-                mcap, pe = fundamentals.get(symbol, (None, None))
-                if mcap:
-                    mcap_values[sheet_row] = f"{mcap / 1e7:,.0f}"   # in crores
-                if pe:
-                    pe_values[sheet_row] = round(pe, 2)
-
-        # Batch write: C (mcap), D (P/E), E:L (returns) for each row
-        updates = []
-        for row, _ in resolved:
-            updates.append({"range": f"C{row}",       "values": [[mcap_values[row]]]})
-            updates.append({"range": f"D{row}",       "values": [[pe_values[row]]]})
-            updates.append({"range": f"E{row}:L{row}", "values": [return_values[row]]})
+        # Wipe any stale return rows from a previous (longer) run, then write
+        # the header row (R4:X4) + returns (R:X) for each resolved row.
+        worksheet.batch_clear(["R5:X60"])
+        updates = [{
+            "range":  "R4:X4",
+            "values": [["1D%", "5D%", "1M%", "3M%", "6M%", "1Y%", "3Y%"]],
+        }]
+        updates += [
+            {"range": f"R{row}:X{row}", "values": [return_values[row]]}
+            for row, _ in resolved
+        ]
         self.sheet_client.batch_update(worksheet, updates)
 
         price_as_of, updated_at = _make_metadata("IN")
@@ -530,6 +509,13 @@ class YahooDataEngine:
         "chola invest fin":     "CHOLAFIN",
         "gmdc":                 "GMDCLTD",
         "multi commodity exch": "MCX",
+        # Screener.in abbreviations (NIFTY500Moment.50 O-column)
+        "m m":                  "M&M",
+        "hindalco inds":        "HINDALCO",
+        "interglobe aviat":     "INDIGO",
+        "cholamaninvfn":        "CHOLAFIN",
+        "aditya birla cap":     "ABCAPITAL",
+        "fortis health":        "FORTIS",
     }
 
     def _resolve_indian_ticker(self, name: str, mapping: dict) -> str:
