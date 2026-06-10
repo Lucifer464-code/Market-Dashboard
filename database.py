@@ -182,13 +182,31 @@ class ReturnCalculator:
                 return None
             return eligible_bwd.iloc[-1]
 
+        # Does current_price already correspond to the last row of the series?
+        #   - yfinance: yf.download() appends a live "today" candle while the
+        #     market is open, so current_price == s_naive.iloc[-1].
+        #   - Kite (Zerodha): historical_data("day") never returns a today
+        #     candle, so when the market is open current_price is the live LTP
+        #     which sits ONE trading day BEYOND the last series row.
+        # We detect which case we're in by comparing current_price to the last
+        # close, and shift the lookback anchor accordingly so "n trading days
+        # ago" is always measured from the correct confirmed close.
+        last_idx = len(s_naive) - 1
+        if last_idx < 0:
+            price_is_in_series = True
+        else:
+            last_close = float(s_naive.iloc[-1])
+            price_is_in_series = (
+                last_close != 0
+                and abs(current_price / last_close - 1) < 1e-6
+            )
+
         def price_n_trading_days_ago(n):
-            # Anchor to the last available price (live or EOD) — always s_naive[-1].
-            # When market is open, s_naive[-1] = live price, so n=1 correctly
-            # gives yesterday's close as the base for 1D return.
-            last_confirmed_idx = len(s_naive) - 1
-            target_idx = last_confirmed_idx - n
-            if target_idx < 0 or last_confirmed_idx < 0:
+            # When current_price is in-series, n days ago = iloc[-1 - n].
+            # When current_price is a live price beyond the series, the last row
+            # is itself "1 trading day ago", so shift the anchor forward by one.
+            target_idx = (last_idx - n) if price_is_in_series else (last_idx - n + 1)
+            if target_idx < 0 or last_idx < 0:
                 return None
             return float(s_naive.iloc[target_idx])
 
