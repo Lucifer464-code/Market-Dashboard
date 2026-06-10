@@ -1537,7 +1537,7 @@ class MarketUpdater:
             for name, fn in [
                 ("ETFs India",         lambda: self.yahoo.update_sheet("ETFs India", "C7:C100", 7, "E")),
                 ("Crypto",             lambda: self.yahoo.update_sheet("Crypto", "B104:B118", 104, "D")),
-                ("Global Indices",     self.global_indices.update_global_indices),
+                ("Global Indices",     lambda: self.global_indices.update_global_indices(self._global_indices_overrides())),
                 ("S&P500 Sectors",     self.sp500_sectors.update_sp500_sectors),
                 ("NIFTY500Moment.50",  self.yahoo.update_nifty_momentum_50),
                 ("Manual ETF Sheets",  self.manual_etf.update_all),
