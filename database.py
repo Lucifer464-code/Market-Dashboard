@@ -182,30 +182,25 @@ class ReturnCalculator:
                 return None
             return eligible_bwd.iloc[-1]
 
-        # Does current_price already correspond to the last row of the series?
-        #   - yfinance: yf.download() appends a live "today" candle while the
-        #     market is open, so current_price == s_naive.iloc[-1].
-        #   - Kite (Zerodha): historical_data("day") never returns a today
-        #     candle, so when the market is open current_price is the live LTP
-        #     which sits ONE trading day BEYOND the last series row.
-        # We detect which case we're in by comparing current_price to the last
-        # close, and shift the lookback anchor accordingly so "n trading days
-        # ago" is always measured from the correct confirmed close.
+        # Where does current_price sit relative to the series?
+        #   - If the series' last row is dated today, current_price (live LTP or
+        #     today's close) represents that same row, so the most recent
+        #     CONFIRMED close — the base for a 1D return — is s_naive[-2].
+        #   - If the series' last row predates today (EOD: current_price == the
+        #     last confirmed close), the base is again s_naive[-2].
+        #   In both cases "n trading days ago" = iloc[-1 - n].
+        #   - Only when the market is open AND the series does NOT yet contain a
+        #     today candle is the live price one step beyond the series; then the
+        #     last row is itself "1 trading day ago" (anchor shifted forward).
+        # A date check is reliable; comparing current_price to the last close is
+        # not (a live LTP rarely equals the candle close in either case).
         last_idx = len(s_naive) - 1
-        if last_idx < 0:
-            price_is_in_series = True
-        else:
-            last_close = float(s_naive.iloc[-1])
-            price_is_in_series = (
-                last_close != 0
-                and abs(current_price / last_close - 1) < 1e-6
-            )
+        last_row_is_today = (last_idx >= 0 and idx_naive[-1].normalize() == today)
+        price_beyond_series = (last_idx >= 0 and not last_row_is_today
+                               and current_price != float(s_naive.iloc[-1]))
 
         def price_n_trading_days_ago(n):
-            # When current_price is in-series, n days ago = iloc[-1 - n].
-            # When current_price is a live price beyond the series, the last row
-            # is itself "1 trading day ago", so shift the anchor forward by one.
-            target_idx = (last_idx - n) if price_is_in_series else (last_idx - n + 1)
+            target_idx = (last_idx - n + 1) if price_beyond_series else (last_idx - n)
             if target_idx < 0 or last_idx < 0:
                 return None
             return float(s_naive.iloc[target_idx])
