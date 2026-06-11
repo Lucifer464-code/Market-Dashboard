@@ -221,7 +221,10 @@ def load_stocks_metadata(sheet_name: str) -> tuple:
 @st.cache_data(ttl=28800)
 def load_sp500_sectors():
     ws = _ws("S&P500 Sectors")
-    return _range_to_df(ws, "B3:K14")
+    df = _range_to_df(ws, "B3:K14")
+    # Attach hyperlinks for the Sector name col (B)
+    links = [("B", df.columns[0])] if not df.empty else []
+    return _attach_col_links(df, "S&P500 Sectors", "B3:K14", links)
 
 
 @st.cache_data(ttl=28800)
