@@ -191,16 +191,6 @@ def _attach_col_links(df: pd.DataFrame, sheet_title: str, full_range: str,
 
 # ── Last updated ──────────────────────────────────────────
 
-@st.cache_data(ttl=28800)
-def load_last_updated() -> str:
-    """Returns the IST time when this cache was last populated.
-    Cached for the same 8h TTL as all data — only updates when data refreshes."""
-    from datetime import datetime, timezone, timedelta
-    IST = timezone(timedelta(hours=5, minutes=30))
-    now = datetime.now(IST)
-    return f"{now.strftime('%b')} {now.day}, {now.strftime('%Y')} {now.strftime('%I:%M %p').lstrip('0')} IST"
-
-
 # ── Stocks metadata (price as of + updated at) ────────────
 
 @st.cache_data(ttl=28800)

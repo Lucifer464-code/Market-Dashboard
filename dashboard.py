@@ -309,72 +309,111 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-# ── Mobile nav ──────────────────────────────────────────────
-ui.mobile_nav(st.session_state.section)
+# ── Resilient sheet load ────────────────────────────────────
+def safe_load(fn, *args):
+    """Call a data loader, retrying once on any error. Returns None on
+    final failure so the calling section can show an inline notice instead
+    of crashing the whole page."""
+    for attempt in range(2):
+        try:
+            return fn(*args)
+        except Exception:
+            if attempt == 0:
+                continue
+            return None
+
+
+# ── Mobile nav (derived from the single-source NAV) ─────────
+# Map section key -> label for header lookups, and build the mobile
+# dropdown structure from NAV so it can never drift from the sidebar.
+_KEY_TO_LABEL = {key: label for items in NAV.values() for label, key in items}
+_MOBILE_NAV   = {group: [label for label, _ in items] for group, items in NAV.items()}
+ui.mobile_nav(_KEY_TO_LABEL.get(st.session_state.section, st.session_state.section), _MOBILE_NAV)
 
 # ── Main content ────────────────────────────────────────────
 section = st.session_state.section
 
 if section == "Global Indices":
-    t1, _ = data.load_global_indices()
+    res = safe_load(data.load_global_indices)
     price_as_of, _ = data.load_stocks_metadata("Global Indices")
     ui.section_header("Global Indices", "Major market indices worldwide",
                       price_as_of=price_as_of)
-    t1 = ui.sort_by_keyword(t1, "5d")
-    ui.render_stat_cards(t1)
-    ui.render_table(t1, bold_first_col=False)
+    if res is None:
+        ui.load_error()
+    else:
+        t1, _ = res
+        t1 = ui.sort_by_keyword(t1, "5d")
+        ui.render_stat_cards(t1)
+        ui.render_table(t1, bold_first_col=False)
 
 elif section == "Additional Global Indices":
-    _, t2 = data.load_global_indices()
+    res = safe_load(data.load_global_indices)
     price_as_of, _ = data.load_stocks_metadata("Global Indices")
     ui.section_header("Additional Global Indices", "More market indices worldwide",
                       price_as_of=price_as_of)
-    if not t2.empty:
-        t2 = ui.sort_by_keyword(t2, "5d")
-        ui.render_stat_cards(t2)
-        ui.render_table(t2, height=600, bold_first_col=False)
+    if res is None:
+        ui.load_error()
+    else:
+        _, t2 = res
+        if not t2.empty:
+            t2 = ui.sort_by_keyword(t2, "5d")
+            ui.render_stat_cards(t2)
+            ui.render_table(t2, height=600, bold_first_col=False)
 
 elif section == "S&P 500 Sectors":
-    df = data.load_sp500_sectors()
+    df = safe_load(data.load_sp500_sectors)
     price_as_of, _ = data.load_stocks_metadata("S&P500 Sectors")
     ui.section_header("S&P 500 Sectors", "S&P 500 sector returns — GICS classification",
                       price_as_of=price_as_of)
-    df = df.drop(df.columns[1], axis=1)
-    df = ui.sort_by_keyword(df, "5d")
-    ui.render_stat_cards(df)
-    ui.render_table(df, bold_first_col=False)
+    if df is None:
+        ui.load_error()
+    else:
+        df = df.drop(df.columns[1], axis=1)
+        df = ui.sort_by_keyword(df, "5d")
+        ui.render_stat_cards(df)
+        ui.render_table(df, bold_first_col=False)
 
 elif section == "Additional NIFTY Sector Indices":
-    t1, _ = data.load_nifty_indices()
+    res = safe_load(data.load_nifty_indices)
     price_as_of, _ = data.load_stocks_metadata("NIFTY Indices")
     ui.section_header("Additional NIFTY Sector Indices", "NSE India sector index returns",
                       price_as_of=price_as_of)
-    t1 = t1.drop(t1.columns[1], axis=1)
-    t1 = ui.sort_by_keyword(t1, "5d")
-    ui.render_stat_cards(t1.drop(t1.columns[2], axis=1))   # exclude P/E from cards
-    ui.render_table(t1, bold_first_col=False)
+    if res is None:
+        ui.load_error()
+    else:
+        t1, _ = res
+        t1 = t1.drop(t1.columns[1], axis=1)
+        t1 = ui.sort_by_keyword(t1, "5d")
+        ui.render_stat_cards(t1.drop(t1.columns[2], axis=1))   # exclude P/E from cards
+        ui.render_table(t1, bold_first_col=False)
 
 elif section == "Broad Market Indices":
-    _, t2 = data.load_nifty_indices()
+    res = safe_load(data.load_nifty_indices)
     price_as_of, _ = data.load_stocks_metadata("NIFTY Indices")
     ui.section_header("Broad Market Indices", "NSE India broad market index returns",
                       price_as_of=price_as_of)
-    if not t2.empty:
-        t2 = t2.drop(t2.columns[1], axis=1)
-        t2 = ui.sort_by_keyword(t2, "5d")
-        ui.render_stat_cards(t2.drop(t2.columns[2], axis=1))   # exclude P/E from cards
-        ui.render_table(t2, bold_first_col=False)
+    if res is None:
+        ui.load_error()
+    else:
+        _, t2 = res
+        if not t2.empty:
+            t2 = t2.drop(t2.columns[1], axis=1)
+            t2 = ui.sort_by_keyword(t2, "5d")
+            ui.render_stat_cards(t2.drop(t2.columns[2], axis=1))   # exclude P/E from cards
+            ui.render_table(t2, bold_first_col=False)
 
 elif section == "NIFTY 500 Momentum 50":
-    df = data.load_nifty_momentum_50()
+    df = safe_load(data.load_nifty_momentum_50)
     price_as_of, _ = data.load_stocks_metadata("NIFTY500Moment.50")
     ui.section_header("NIFTY 500 Momentum 50", "Momentum stocks — NSE",
                       price_as_of=price_as_of)
-    if not df.empty:
+    if df is None:
+        ui.load_error()
+    elif not df.empty:
         ui.render_table(df, bold_first_col=False)
 
-    sectors_500    = data.load_nifty500_sectors()
-    sectors_moment = data.load_nifty_momentum_sectors()
+    sectors_500    = safe_load(data.load_nifty500_sectors)
+    sectors_moment = safe_load(data.load_nifty_momentum_sectors)
 
     # 42px header + 10 rows * 37px + 20px padding = 432 (render_table auto-calc formula)
     _SIDE_TABLE_HEIGHT = 432
@@ -388,147 +427,186 @@ elif section == "NIFTY 500 Momentum 50":
     with col_left:
         st.markdown(f"<div style='{_title_style}'>NIFTY 500 Sectors</div>",
                     unsafe_allow_html=True)
-        if not sectors_500.empty:
+        if sectors_500 is not None and not sectors_500.empty:
             df_500 = ui.sort_by_keyword(sectors_500.iloc[:, [0, 2]], "weight")
             ui.render_table(df_500, bold_first_col=False,
                             height=_SIDE_TABLE_HEIGHT, fixed_height=True)
     with col_right:
         st.markdown(f"<div style='{_title_style}'>NIFTY Momentum Sectors</div>",
                     unsafe_allow_html=True)
-        if not sectors_moment.empty:
+        if sectors_moment is not None and not sectors_moment.empty:
             df_moment = ui.sort_by_keyword(sectors_moment.iloc[:, [0, 2]], "weight")
             ui.render_table(df_moment, bold_first_col=False,
                             height=_SIDE_TABLE_HEIGHT, fixed_height=True)
 
 elif section == "NIFTY Sectors":
-    df = data.load_nifty_sectors()
+    df = safe_load(data.load_nifty_sectors)
     price_as_of, _ = data.load_stocks_metadata("NIFTY Sectors")
     ui.section_header("NIFTY Sectors", "Sector-wise returns — India",
                       price_as_of=price_as_of)
-    df = df.drop(df.columns[1], axis=1)
-    df = ui.sort_by_keyword(df, "5d")
-    ui.render_stat_cards(df.drop(df.columns[2], axis=1))   # exclude P/E from cards
-    ui.render_table(df, bold_first_col=False)
+    if df is None:
+        ui.load_error()
+    else:
+        df = df.drop(df.columns[1], axis=1)
+        df = ui.sort_by_keyword(df, "5d")
+        ui.render_stat_cards(df.drop(df.columns[2], axis=1))   # exclude P/E from cards
+        ui.render_table(df, bold_first_col=False)
 
 elif section == "ETFs US":
-    df = data.load_etfs_us()
+    df = safe_load(data.load_etfs_us)
     price_as_of, _ = data.load_stocks_metadata("ETFs US")
     ui.section_header("ETFs US", "Top US ETFs by AUM",
                       price_as_of=price_as_of)
-    df = df.drop(df.columns[2], axis=1)
-    ui.render_table(df, height=620)
+    if df is None:
+        ui.load_error()
+    else:
+        df = df.drop(df.columns[2], axis=1)
+        ui.render_table(df, height=620, searchable=True)
 
 elif section == "Leveraged Funds":
-    df = data.load_leveraged_funds()
+    df = safe_load(data.load_leveraged_funds)
     price_as_of, _ = data.load_stocks_metadata("Biggest Leveraged Funds ")
     ui.section_header("Leveraged Funds", "Biggest leveraged ETFs",
                       price_as_of=price_as_of)
-    df = df.drop(df.columns[3], axis=1)
-    ui.render_table(df)
+    if df is None:
+        ui.load_error()
+    else:
+        df = df.drop(df.columns[3], axis=1)
+        ui.render_table(df, searchable=True)
 
 elif section == "ETFs India":
-    df = data.load_etfs_india()
+    df = safe_load(data.load_etfs_india)
     price_as_of, _ = data.load_stocks_metadata("ETFs India")
     ui.section_header("ETFs India", "Indian exchange-listed ETFs",
                       price_as_of=price_as_of)
-    df = df.drop(df.columns[1], axis=1)
-    ui.render_table(df, bold_first_col=False)
+    if df is None:
+        ui.load_error()
+    else:
+        df = df.drop(df.columns[1], axis=1)
+        ui.render_table(df, bold_first_col=False, searchable=True)
 
 elif section == "Commodity ETFs":
-    df = data.load_commodity_etfs()
+    df = safe_load(data.load_commodity_etfs)
     price_as_of, _ = data.load_stocks_metadata("Commodity ETFs")
     ui.section_header("Commodity ETFs", "Metals & commodity ETFs by exposure",
                       price_as_of=price_as_of)
-    # Drop the duplicate exchange-qualified Ticker column (col index 3: Metal? no)
-    # Columns: Ticker, ETF name, Metal, Ticker(exch), Price, 1D, 5D, ... — drop col 3
-    df = df.drop(df.columns[3], axis=1)
-    df = ui.sort_by_keyword(df, "5d")
-    ui.render_table(df, bold_first_col=False)
+    if df is None:
+        ui.load_error()
+    else:
+        # Columns: Ticker, ETF name, Metal, Ticker(exch), Price, 1D, 5D, ... — drop col 3
+        df = df.drop(df.columns[3], axis=1)
+        df = ui.sort_by_keyword(df, "5d")
+        ui.render_table(df, bold_first_col=False)
 
 elif section == "Leveraged Commodity Funds":
-    df = data.load_leveraged_commodity_funds()
+    df = safe_load(data.load_leveraged_commodity_funds)
     price_as_of, _ = data.load_stocks_metadata("Biggest Leveraged Funds(Com.)")
     ui.section_header("Leveraged Commodity Funds", "Biggest leveraged commodity ETFs",
                       price_as_of=price_as_of)
-    # Columns: Ticker, Name, Leverage, Commodity, AUM(USD numeric), AUM (fmt), ...
-    # Drop the redundant numeric AUM column (index 4); keep Commodity + formatted AUM.
-    if len(df.columns) > 4:
-        df = df.drop(df.columns[4], axis=1)
-    ui.render_table(df)
+    if df is None:
+        ui.load_error()
+    else:
+        # Columns: Ticker, Name, Leverage, Commodity, AUM(USD numeric), AUM (fmt), ...
+        # Drop the redundant numeric AUM column (index 4); keep Commodity + formatted AUM.
+        if len(df.columns) > 4:
+            df = df.drop(df.columns[4], axis=1)
+        ui.render_table(df)
 
 elif section == "Crypto":
-    df = data.load_crypto()
+    df = safe_load(data.load_crypto)
     price_as_of, _ = data.load_stocks_metadata("Crypto")
     ui.section_header("Crypto", "Top cryptocurrencies by market cap",
                       price_as_of=price_as_of)
-    ui.render_table(df)
+    if df is None:
+        ui.load_error()
+    else:
+        ui.render_table(df)
 
 elif section == "Mutual Funds India":
-    df = data.load_mutual_funds()
+    df = safe_load(data.load_mutual_funds)
     price_as_of, _ = data.load_stocks_metadata("Mutual Funds India")
     ui.section_header("Mutual Funds India", "NAV and returns",
                       price_as_of=price_as_of)
-    ui.render_table(df, height=620, bold_first_col=False)
+    if df is None:
+        ui.load_error()
+    else:
+        ui.render_table(df, height=620, bold_first_col=False, searchable=True)
 
 elif section == "Gainers & Losers US":
-    gainers, losers = data.load_gl_us()
+    res = safe_load(data.load_gl_us)
     price_as_of, _ = data.load_stocks_metadata("Top G&L US")
     ui.section_header(
         "Gainers & Losers — US",
         "Top 15 weekly gainers and losers · Russell 3000 ($2B+ market cap)",
         price_as_of=price_as_of,
     )
-    col1, col2 = st.columns(2)
-    with col1:
-        ui.secondary_label("Gainers")
-        ui.render_table(gainers)
-    with col2:
-        ui.secondary_label("Losers")
-        ui.render_table(losers)
+    if res is None:
+        ui.load_error()
+    else:
+        gainers, losers = res
+        col1, col2 = st.columns(2)
+        with col1:
+            ui.secondary_label("Gainers")
+            ui.render_table(gainers)
+        with col2:
+            ui.secondary_label("Losers")
+            ui.render_table(losers)
 
 elif section == "Gainers & Losers India":
-    gainers, losers = data.load_gl_india()
+    res = safe_load(data.load_gl_india)
     price_as_of, _ = data.load_stocks_metadata("Top G&L India")
     ui.section_header(
         "Gainers & Losers — India",
         "Top 15 weekly gainers and losers · NIFTY 500 (Rs1000Cr+ market cap)",
         price_as_of=price_as_of,
     )
-    col1, col2 = st.columns(2)
-    with col1:
-        ui.secondary_label("Gainers")
-        ui.render_table(gainers)
-    with col2:
-        ui.secondary_label("Losers")
-        ui.render_table(losers)
+    if res is None:
+        ui.load_error()
+    else:
+        gainers, losers = res
+        col1, col2 = st.columns(2)
+        with col1:
+            ui.secondary_label("Gainers")
+            ui.render_table(gainers)
+        with col2:
+            ui.secondary_label("Losers")
+            ui.render_table(losers)
 
 elif section == "ATH US":
-    df = data.load_ath_us()
+    df = safe_load(data.load_ath_us)
     price_as_of, _ = data.load_stocks_metadata("ATH US")
     ui.section_header(
         "All-Time High — US",
         "Stocks within 5% of all-time high · sorted by 1W%",
         price_as_of=price_as_of,
     )
-    ui.render_table(df, height=620)
+    if df is None:
+        ui.load_error()
+    else:
+        ui.render_table(df, height=620, searchable=True)
 
 elif section == "ATH India":
-    df = data.load_ath_india()
+    df = safe_load(data.load_ath_india)
     price_as_of, _ = data.load_stocks_metadata("ATH India")
     ui.section_header(
         "All-Time High — India",
         "Stocks within 5% of all-time high · sorted by 1W%",
         price_as_of=price_as_of,
     )
-    ui.render_table(df, height=620)
+    if df is None:
+        ui.load_error()
+    else:
+        ui.render_table(df, height=620, searchable=True)
 
 elif section == "Indian Investors":
-    df = data.load_investor_holdings()
+    df = safe_load(data.load_investor_holdings)
     ui.section_header(
         "Indian Institutional Investors",
         "Quarterly 1%+ holdings and changes",
     )
-    if df.empty:
+    if df is None:
+        ui.load_error()
+    elif df.empty:
         st.info("No data available.")
     else:
         investors = sorted(df["Investor"].dropna().unique())
@@ -560,11 +638,17 @@ elif section == "Indian Investors":
         ui.render_table(view, height=620, bold_first_col=False, cell_color_map=change_colors)
 
 elif section == "Hedge Funds":
-    df = data.load_hedge_funds()
+    df = safe_load(data.load_hedge_funds)
     ui.section_header("Hedge Funds", "Top hedge funds overview")
-    ui.render_table(df, bold_first_col=False)
+    if df is None:
+        ui.load_error()
+    else:
+        ui.render_table(df, bold_first_col=False)
 
 elif section == "Top Hedge Fund Investments":
-    df = data.load_top_hedge_fund_investments()
+    df = safe_load(data.load_top_hedge_fund_investments)
     ui.section_header("Top Hedge Fund Investments", "Largest hedge fund positions")
-    ui.render_table(df, bold_first_col=False)
+    if df is None:
+        ui.load_error()
+    else:
+        ui.render_table(df, bold_first_col=False)

@@ -9,14 +9,6 @@ import streamlit.components.v1 as components
 GREEN = "#34a853"
 RED   = "#ea4335"
 
-_NAV_GROUPS = {
-    "MARKETS": ["Global Indices", "Additional Global Indices", "NIFTY Sectoral Indices", "Additional NIFTY Sectoral Indices", "Broad Market Indices", "NIFTY 500 Momentum 50", "S&P 500 Sectors"],
-    "FUNDS":   ["ETFs US", "Leveraged Funds", "ETFs India", "Commodity ETFs", "Leveraged Commodity Funds", "Mutual Funds India"],
-    "CRYPTO":  ["Crypto"],
-    "STOCKS":  ["Gainers & Losers US", "Gainers & Losers India", "ATH US", "ATH India"],
-    "INSTITUTIONAL INVESTORS": ["Hedge Funds", "Top Hedge Fund Investments", "Indian Investors"],
-}
-
 
 def _pct_style(val) -> str:
     """Return CSS color rule for a percentage cell value."""
@@ -142,11 +134,14 @@ def render_stat_cards(df: pd.DataFrame, secondary_df: pd.DataFrame | None = None
 
 
 def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bool = True,
-                 fixed_height: bool = False, cell_color_map: dict | None = None):
+                 fixed_height: bool = False, cell_color_map: dict | None = None,
+                 searchable: bool = False):
     """Render a sortable HTML table with red centered headers.
     Columns named "__link__<header>" are treated as hyperlink sidecars for
     the column named <header>; they are not displayed, but their values
     wrap the corresponding cell content in an <a> tag.
+    searchable=True adds an in-browser search box that filters rows
+    client-side (case-insensitive, matches any cell; no Streamlit rerun).
     """
     if df.empty:
         st.info("No data available.")
@@ -216,6 +211,17 @@ def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bo
     row_count = len(df)
     frame_height = height if height else min(42 + row_count * 37 + 20, 600)
 
+    # Search box (client-side filter) sits above the scroll area; reserve
+    # vertical space for it so the table itself isn't clipped.
+    search_box_h = 44 if searchable else 0
+    search_html = (
+        '<input id="tsearch" type="text" placeholder="Search…" '
+        'oninput="filterTable()" autocomplete="off" '
+        'style="width:100%;box-sizing:border-box;padding:8px 12px;margin-bottom:8px;'
+        'border:1px solid #e2e8f0;border-radius:8px;font-size:13px;outline:none" />'
+        if searchable else ""
+    )
+
     html = f"""
 <!DOCTYPE html><html><head><style>
   body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; font-size:13px; }}
@@ -248,6 +254,7 @@ def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bo
     .sort-icon {{ margin-left:3px; font-size:9px; }}
   }}
 </style></head><body>
+{search_html}
 <div class="scroll-wrap">
   <table id="t">
     <thead><tr>{header_cells}</tr></thead>
@@ -255,6 +262,13 @@ def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bo
   </table>
 </div>
 <script>
+  function filterTable() {{
+    var q = (document.getElementById('tsearch').value || '').toLowerCase();
+    var tb = document.getElementById('t').tBodies[0];
+    Array.from(tb.rows).forEach(function(r) {{
+      r.style.display = r.innerText.toLowerCase().indexOf(q) > -1 ? '' : 'none';
+    }});
+  }}
   var dir = {{}};
   function sortTable(col) {{
     var tb = document.getElementById('t').tBodies[0];
@@ -285,7 +299,7 @@ def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bo
 </script>
 </body></html>
 """
-    components.html(html, height=frame_height + 10, scrolling=False)
+    components.html(html, height=frame_height + 10 + search_box_h, scrolling=False)
 
 
 def section_header(title: str, subtitle: str = "", price_as_of: str = "", updated_at: str = ""):
@@ -325,6 +339,19 @@ def section_header(title: str, subtitle: str = "", price_as_of: str = "", update
     )
 
 
+def load_error():
+    """Inline notice shown when a section's sheet load fails (after retry).
+    Visually distinct from the 'No data available.' empty state so a real
+    outage is not mistaken for an empty table."""
+    st.markdown(
+        "<div style='background:#fef2f2;border:1px solid #fecaca;border-radius:8px;"
+        "padding:14px 16px;color:#b91c1c;font-size:13px'>"
+        "Couldn't load this section. Try <b>Refresh Data</b> in the sidebar."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
 def sort_by_keyword(df: pd.DataFrame, keyword: str) -> pd.DataFrame:
     """Return df sorted descending by first column whose name contains keyword."""
     for col in df.columns:
@@ -350,11 +377,15 @@ def secondary_label(text: str):
     )
 
 
-def mobile_nav(current_section: str):
+def mobile_nav(current_section: str, nav_groups: dict):
     """Trigger bar in iframe; dropdown injected into parent page DOM as
-    position:fixed so it floats above all Streamlit content."""
+    position:fixed so it floats above all Streamlit content.
+
+    nav_groups: {group_label: [section_label, ...]} — derived from the
+    single-source NAV in dashboard.py so the mobile dropdown can't drift
+    from the sidebar."""
     import json as _json
-    nav_data = [{"group": g, "sections": s} for g, s in _NAV_GROUPS.items()]
+    nav_data = [{"group": g, "sections": s} for g, s in nav_groups.items()]
 
     components.html(f"""<!DOCTYPE html><html><head><style>
 * {{ box-sizing:border-box; margin:0; padding:0; }}
