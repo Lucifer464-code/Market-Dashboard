@@ -259,7 +259,9 @@ def load_nifty_sectors():
 @st.cache_data(ttl=28800)
 def load_nifty_momentum_50():
     ws = _ws("NIFTY500Moment.50")
-    return _range_to_df(ws, "B4:L54")
+    # Consolidated momentum table: header row 4, data rows 5-29.
+    # Cols: Name, Mar Cap Rs.Cr., P/E, 1D%, 5D%, 1M%, 3M%, 6M%, 1Y%, 3Y%.
+    return _range_to_df(ws, "O4:X40")
 
 
 @st.cache_data(ttl=28800)
