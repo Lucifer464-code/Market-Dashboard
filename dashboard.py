@@ -234,6 +234,7 @@ if "section" not in st.session_state:
 # ── Sidebar navigation ─────────────────────────────────────
 NAV = {
     "MARKETS": [
+        ("Live Market",                       "Live Market"),
         ("Global Indices",                    "Global Indices"),
         ("Additional Global Indices",         "Additional Global Indices"),
         ("NIFTY Sectoral Indices",            "NIFTY Sectors"),
@@ -323,6 +324,30 @@ def safe_load(fn, *args):
             return None
 
 
+# Firebase WEB config for the Live Market page (StockPulse Firestore project).
+# Client-safe (Firestore rules are read-only). Read from secrets if present,
+# else fall back to the known stockpulse-e3c5f values so the page works
+# before secrets are configured.
+_FIREBASE_WEB_CONFIG_FALLBACK = {
+    "apiKey":            "AIzaSyC3Lv7qDkXzUf36Kgib5bVyU86Um8x07o0",
+    "authDomain":        "stockpulse-e3c5f.firebaseapp.com",
+    "projectId":         "stockpulse-e3c5f",
+    "storageBucket":     "stockpulse-e3c5f.appspot.com",
+    "messagingSenderId": "837839164226",
+    "appId":             "1:837839164226:web:5c363f290b0b61afc66edb",
+}
+
+
+def firebase_web_config() -> dict:
+    try:
+        cfg = st.secrets.get("FIREBASE_WEB_CONFIG")
+        if cfg:
+            return dict(cfg)
+    except Exception:
+        pass
+    return _FIREBASE_WEB_CONFIG_FALLBACK
+
+
 _HEATMAP_PERIODS = ["1D", "5D", "1M", "3M", "6M", "1Y", "3Y"]
 
 
@@ -363,7 +388,11 @@ ui.mobile_nav(_KEY_TO_LABEL.get(st.session_state.section, st.session_state.secti
 # ── Main content ────────────────────────────────────────────
 section = st.session_state.section
 
-if section == "Global Indices":
+if section == "Live Market":
+    ui.section_header("Live Market", "Live NSE prices · updates while the market is open")
+    ui.render_live_market(firebase_web_config())
+
+elif section == "Global Indices":
     res = safe_load(data.load_global_indices)
     price_as_of, _ = data.load_stocks_metadata("Global Indices")
     ui.section_header("Global Indices", "Major market indices worldwide",

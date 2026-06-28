@@ -417,6 +417,165 @@ def render_heatmap(df: pd.DataFrame, name_col: str, period_col: str,
     components.html(html, height=frame_height, scrolling=False)
 
 
+def render_live_market(firebase_config: dict):
+    """Embed a client-side Firestore live-market widget.
+
+    The user's browser connects directly to the StockPulse Firestore project
+    via the Firebase web SDK and onSnapshot (push updates). Streamlit only
+    hosts the HTML — no Firebase Python SDK, no service-account secret.
+
+    firebase_config: the Firebase WEB config dict (client-safe; Firestore
+    rules are read-only). Renders three live sections: headline indices,
+    NIFTY sectoral indices, and broad NIFTY indices.
+    """
+    import json as _json
+    cfg = _json.dumps(firebase_config)
+
+    html = f"""
+<!DOCTYPE html><html><head><style>
+  :root {{ --green:#34a853; --red:#ea4335; --ink:#0f172a; --muted:#94a3b8; }}
+  * {{ box-sizing:border-box; }}
+  body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+          color:var(--ink); background:#f8fafc; }}
+  .lm-bar {{ display:flex; align-items:center; justify-content:space-between;
+             margin-bottom:14px; }}
+  .lm-badge {{ display:inline-flex; align-items:center; gap:7px; font-size:12px;
+               font-weight:600; padding:6px 12px; border-radius:999px;
+               background:#dcfce7; color:#166534; }}
+  .lm-badge .dot {{ width:8px; height:8px; border-radius:50%; background:#22c55e;
+                    animation:pulse 1.6s infinite; }}
+  .lm-badge.closed {{ background:#f1f5f9; color:#64748b; }}
+  .lm-badge.closed .dot {{ background:#94a3b8; animation:none; }}
+  @keyframes pulse {{ 0%{{opacity:1}} 50%{{opacity:.35}} 100%{{opacity:1}} }}
+  @media (prefers-reduced-motion: reduce) {{ .lm-badge .dot {{ animation:none; }} }}
+  .lm-clock {{ font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; }}
+  .lm-note {{ font-size:11px; color:var(--muted); margin:-6px 0 14px; }}
+  .lm-section-title {{ font-size:13px; font-weight:700; color:var(--ink);
+                       margin:18px 0 8px; }}
+  .kpi-grid {{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }}
+  .kpi {{ background:white; border:1px solid #e2e8f0; border-radius:10px;
+          padding:14px 16px; }}
+  .kpi-label {{ font-size:10px; color:var(--muted); font-weight:600;
+                text-transform:uppercase; letter-spacing:.8px; }}
+  .kpi-val {{ font-size:22px; font-weight:700; margin-top:6px;
+              font-variant-numeric:tabular-nums; }}
+  .kpi-chg {{ font-size:12px; font-weight:600; margin-top:3px; }}
+  .kpi-pts {{ font-size:11px; color:var(--muted); margin-top:2px; }}
+  .up {{ color:var(--green); }} .down {{ color:var(--red); }}
+  .grid {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+           gap:8px; }}
+  .row {{ background:white; border:1px solid #e2e8f0; border-radius:10px;
+          padding:12px 14px; display:flex; align-items:center; gap:10px; }}
+  .row .nm {{ font-size:13px; font-weight:600; flex:1; overflow:hidden;
+              text-overflow:ellipsis; white-space:nowrap; }}
+  .row .vl {{ font-size:13px; font-variant-numeric:tabular-nums; color:#334155; }}
+  .row .pc {{ font-size:13px; font-weight:700; min-width:64px; text-align:right;
+              font-variant-numeric:tabular-nums; }}
+  .empty {{ color:var(--muted); font-size:12px; padding:10px 0; }}
+  @media (max-width:768px) {{
+    .kpi-grid {{ grid-template-columns:repeat(2,1fr); }}
+    .grid {{ grid-template-columns:1fr; }}
+  }}
+</style></head><body>
+
+<div class="lm-bar">
+  <div class="lm-badge" id="badge"><span class="dot"></span><span id="badge-tx">NSE Open</span></div>
+  <div class="lm-clock" id="clock">--:--:-- IST</div>
+</div>
+<div class="lm-note" id="note" style="display:none">Showing closing prices · as of 15:30 IST</div>
+
+<div class="lm-section-title">Headline Indices</div>
+<div class="kpi-grid" id="kpis">
+  <div class="kpi" data-id="nifty50"><div class="kpi-label">NIFTY 50</div><div class="kpi-val" data-val>—</div><div class="kpi-chg" data-chg>—</div><div class="kpi-pts" data-pts></div></div>
+  <div class="kpi" data-id="sensex"><div class="kpi-label">SENSEX</div><div class="kpi-val" data-val>—</div><div class="kpi-chg" data-chg>—</div><div class="kpi-pts" data-pts></div></div>
+  <div class="kpi" data-id="banknifty"><div class="kpi-label">BANK NIFTY</div><div class="kpi-val" data-val>—</div><div class="kpi-chg" data-chg>—</div><div class="kpi-pts" data-pts></div></div>
+  <div class="kpi" data-id="vix"><div class="kpi-label">VIX</div><div class="kpi-val" data-val>—</div><div class="kpi-chg" data-chg>—</div><div class="kpi-pts" data-pts></div></div>
+</div>
+
+<div class="lm-section-title">NIFTY Sectoral Indices</div>
+<div class="grid" id="sectors"><div class="empty">Connecting…</div></div>
+
+<div class="lm-section-title">Broad NIFTY Indices</div>
+<div class="grid" id="broad"><div class="empty">Connecting…</div></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+<script>
+const firebaseConfig = {cfg};
+
+// ---- formatting ----
+function fmtPrice(v) {{ return Number(v).toLocaleString('en-IN',{{minimumFractionDigits:2,maximumFractionDigits:2}}); }}
+function fmtPct(p) {{ const s=p>=0?'▲ +':'▼ −'; return s+Math.abs(p).toFixed(2)+'%'; }}
+function barW(p) {{ return Math.min(Math.abs(p)*33.33,100).toFixed(1)+'%'; }}
+
+// ---- market status (mirrors StockPulse) ----
+const NSE_HOLIDAYS=new Set(['2026-01-26','2026-02-16','2026-03-04','2026-03-21','2026-03-31','2026-04-01','2026-04-03','2026-04-14','2026-05-01','2026-05-27','2026-07-06','2026-08-15','2026-08-28','2026-10-02','2026-10-21','2026-11-09','2026-11-24','2026-12-25']);
+function istKey(d){{return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}}
+function marketStatus(ist){{
+  const day=ist.getDay(); if(day===0||day===6) return 'closed';
+  if(NSE_HOLIDAYS.has(istKey(ist))) return 'closed';
+  const m=ist.getHours()*60+ist.getMinutes(); const o=9*60+15, c=15*60+30;
+  if(m<o||m>c) return 'closed'; if(m===c&&ist.getSeconds()>0) return 'closed';
+  return 'open';
+}}
+function tick(){{
+  const ist=new Date(new Date().toLocaleString('en-US',{{timeZone:'Asia/Kolkata'}}));
+  document.getElementById('clock').textContent=
+    String(ist.getHours()).padStart(2,'0')+':'+String(ist.getMinutes()).padStart(2,'0')+':'+String(ist.getSeconds()).padStart(2,'0')+' IST';
+  const st=marketStatus(ist), closed=st==='closed';
+  const b=document.getElementById('badge'); b.classList.toggle('closed',closed);
+  document.getElementById('badge-tx').textContent=closed?'NSE Closed':'NSE Open';
+  document.getElementById('note').style.display=closed?'block':'none';
+}}
+setInterval(tick,1000); tick();
+
+// ---- render helpers ----
+function setKpi(id,d){{
+  const c=document.querySelector('.kpi[data-id="'+id+'"]'); if(!c) return;
+  c.querySelector('[data-val]').textContent=fmtPrice(d.value);
+  const ch=c.querySelector('[data-chg]'); ch.textContent=fmtPct(d.change_pct);
+  ch.className='kpi-chg '+(d.change_pct>=0?'up':'down');
+  const pts=c.querySelector('[data-pts]');
+  if(!d.is_vix && d.change_pts!=null){{ const s=d.change_pts>=0?'+':'−'; pts.textContent=s+Math.abs(d.change_pts).toFixed(2)+' pts'; }}
+}}
+function renderRows(containerId,docs){{
+  const el=document.getElementById(containerId);
+  if(!docs.length){{ el.innerHTML='<div class="empty">No data available.</div>'; return; }}
+  docs.sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
+  el.innerHTML=docs.map(s=>{{
+    const p=s.change_pct||0, cls=p>=0?'up':'down', sign=p>=0?'+':'−';
+    const val=s.value!=null?fmtPrice(s.value):'—';
+    return '<div class="row"><div class="nm">'+s.name+'</div><div class="vl">'+val+'</div>'+
+           '<div class="pc '+cls+'">'+sign+Math.abs(p).toFixed(2)+'%</div></div>';
+  }}).join('');
+}}
+
+// ---- firestore live ----
+try {{
+  firebase.initializeApp(firebaseConfig);
+  const db=firebase.firestore();
+  ['nifty50','sensex','banknifty','vix'].forEach(id=>{{
+    db.collection('indices').doc(id).onSnapshot(
+      doc=>{{ if(doc.exists) setKpi(id,doc.data()); }},
+      err=>console.warn('indices/'+id,err));
+  }});
+  db.collection('sectors').onSnapshot(
+    snap=>renderRows('sectors',snap.docs.map(d=>d.data())),
+    err=>{{ console.warn('sectors',err); document.getElementById('sectors').innerHTML='<div class="empty">Live feed unavailable.</div>'; }});
+  db.collection('broad_indices').onSnapshot(
+    snap=>renderRows('broad',snap.docs.map(d=>d.data())),
+    err=>{{ console.warn('broad_indices',err); document.getElementById('broad').innerHTML='<div class="empty">Live feed unavailable.</div>'; }});
+}} catch(e) {{
+  console.error('Firebase init failed',e);
+  document.getElementById('sectors').innerHTML='<div class="empty">Live feed unavailable.</div>';
+  document.getElementById('broad').innerHTML='<div class="empty">Live feed unavailable.</div>';
+}}
+</script>
+</body></html>
+"""
+    components.html(html, height=720, scrolling=True)
+
+
 def section_header(title: str, subtitle: str = "", price_as_of: str = "", updated_at: str = ""):
     if price_as_of:
         top_right = price_as_of
