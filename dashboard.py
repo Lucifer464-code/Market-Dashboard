@@ -325,11 +325,11 @@ def safe_load(fn, *args):
 
 
 # Firebase WEB config for the Live Market page (StockPulse Firestore project).
-# Client-safe (Firestore rules are read-only). Read from secrets if present,
-# else fall back to the known stockpulse-e3c5f values so the page works
-# before secrets are configured.
-_FIREBASE_WEB_CONFIG_FALLBACK = {
-    "apiKey":            "AIzaSyC3Lv7qDkXzUf36Kgib5bVyU86Um8x07o0",
+# The apiKey is provided ONLY via st.secrets["FIREBASE_WEB_CONFIG"] — never
+# hard-coded in source (GitHub secret scanning flags Google API keys). The
+# non-secret identifiers below are used as defaults for any keys the secret
+# omits; without a configured apiKey the Live Market page shows a setup notice.
+_FIREBASE_WEB_CONFIG_DEFAULTS = {
     "authDomain":        "stockpulse-e3c5f.firebaseapp.com",
     "projectId":         "stockpulse-e3c5f",
     "storageBucket":     "stockpulse-e3c5f.appspot.com",
@@ -339,13 +339,15 @@ _FIREBASE_WEB_CONFIG_FALLBACK = {
 
 
 def firebase_web_config() -> dict:
+    """Return the Firebase web config, merging st.secrets over the non-secret
+    defaults. Returns {} (no apiKey) if the secret isn't configured."""
     try:
         cfg = st.secrets.get("FIREBASE_WEB_CONFIG")
         if cfg:
-            return dict(cfg)
+            return {**_FIREBASE_WEB_CONFIG_DEFAULTS, **dict(cfg)}
     except Exception:
         pass
-    return _FIREBASE_WEB_CONFIG_FALLBACK
+    return {}
 
 
 _HEATMAP_PERIODS = ["1D", "5D", "1M", "3M", "6M", "1Y", "3Y"]
@@ -390,7 +392,12 @@ section = st.session_state.section
 
 if section == "Live Market":
     ui.section_header("Live Market", "Live NSE prices · updates while the market is open")
-    ui.render_live_market(firebase_web_config())
+    _fb_cfg = firebase_web_config()
+    if not _fb_cfg.get("apiKey"):
+        st.info("Live Market is not configured. Add FIREBASE_WEB_CONFIG "
+                "(including apiKey) to the app secrets to enable it.")
+    else:
+        ui.render_live_market(_fb_cfg)
 
 elif section == "Global Indices":
     res = safe_load(data.load_global_indices)
