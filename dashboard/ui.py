@@ -302,6 +302,121 @@ def render_table(df: pd.DataFrame, height: int | None = None, bold_first_col: bo
     components.html(html, height=frame_height + 10 + search_box_h, scrolling=False)
 
 
+def _heat_color(val: float, lo: float, hi: float) -> tuple[str, str]:
+    """Map a return value to (background, text) hex colors.
+    Positive values scale 0..hi toward deep green; negative 0..lo toward
+    deep red; near-zero stays pale. Intensity is relative to the lo/hi of
+    the values currently in view. Returns (bg, fg)."""
+    # Pale endpoints -> saturated endpoints
+    GREEN_LIGHT, GREEN_DEEP = (0xE9, 0xF7, 0xEE), (0x18, 0x7A, 0x3B)
+    RED_LIGHT,   RED_DEEP   = (0xFD, 0xEC, 0xEC), (0xB3, 0x26, 0x1A)
+    NEUTRAL = (0xF1, 0xF5, 0xF9)
+
+    def _lerp(a, b, t):
+        return tuple(round(a[i] + (b[i] - a[i]) * t) for i in range(3))
+
+    try:
+        v = float(val)
+    except (ValueError, TypeError):
+        r, g, b = NEUTRAL
+        return f"#{r:02x}{g:02x}{b:02x}", "#0f172a"
+
+    if v > 0 and hi > 0:
+        t = min(v / hi, 1.0)
+        bg = _lerp(GREEN_LIGHT, GREEN_DEEP, t)
+    elif v < 0 and lo < 0:
+        t = min(v / lo, 1.0)   # lo is negative, v is negative -> 0..1
+        bg = _lerp(RED_LIGHT, RED_DEEP, t)
+    else:
+        bg = NEUTRAL
+        t = 0.0
+
+    # White text once the tile is dark enough for contrast
+    fg = "#ffffff" if t > 0.55 else "#0f172a"
+    r, g, b = bg
+    return f"#{r:02x}{g:02x}{b:02x}", fg
+
+
+def resolve_period_col(df: pd.DataFrame, period: str) -> str | None:
+    """Find the df column matching a period label like '5D', tolerant of
+    '%'/'↓' suffixes and whitespace used in the sheets. Returns the column
+    name or None if no match."""
+    target = period.strip().lower()
+    for c in df.columns:
+        norm = str(c).lower().replace("%", "").replace("↓", "").strip()
+        if norm == target:
+            return c
+    return None
+
+
+def render_heatmap(df: pd.DataFrame, name_col: str, period_col: str,
+                   link_col: str | None = None):
+    """Render sectors as a colored CSS-grid heatmap.
+    name_col   : column holding the sector/tile label.
+    period_col : column whose numeric value drives tile color + is shown.
+    link_col   : optional "__link__<header>" sidecar; if present, tiles link.
+    Color intensity is scaled relative to the min/max of period_col in view.
+    """
+    if df.empty:
+        st.info("No data available.")
+        return
+    if not period_col or period_col not in df.columns:
+        st.info("No data available for the selected period.")
+        return
+
+    def _num(v):
+        try:
+            return float(str(v).replace("%", "").replace("+", "").replace(",", "").strip())
+        except (ValueError, TypeError):
+            return None
+
+    vals = [_num(v) for v in df[period_col]]
+    nums = [v for v in vals if v is not None]
+    if not nums:
+        st.info("No data available.")
+        return
+    lo, hi = min(nums), max(nums)
+
+    tiles = ""
+    for (_, row), v in zip(df.iterrows(), vals):
+        name = str(row[name_col])
+        if v is None:
+            bg, fg, label = "#f1f5f9", "#0f172a", "NA"
+        else:
+            bg, fg = _heat_color(v, lo, hi)
+            label = f"{v:+.2f}%"
+        link = row[link_col] if (link_col and link_col in df.columns) else None
+        inner = (
+            f'<div style="font-size:13px;font-weight:600;line-height:1.2;'
+            f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{name}</div>'
+            f'<div style="font-size:18px;font-weight:700;margin-top:6px">{label}</div>'
+        )
+        if link:
+            inner = (f'<a href="{link}" target="_blank" rel="noopener noreferrer" '
+                     f'style="color:inherit;text-decoration:none">{inner}</a>')
+        tiles += (
+            f'<div style="background:{bg};color:{fg};border-radius:10px;'
+            f'padding:16px 14px;min-height:78px;display:flex;flex-direction:column;'
+            f'justify-content:center">{inner}</div>'
+        )
+
+    rows = (len(df) + 3) // 4   # ~4 tiles per row on desktop
+    frame_height = 40 + rows * 100
+
+    html = f"""
+<!DOCTYPE html><html><head><style>
+  body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }}
+  .heat-grid {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:8px; }}
+  @media (max-width:768px) {{
+    .heat-grid {{ grid-template-columns:repeat(2,1fr); gap:6px; }}
+  }}
+</style></head><body>
+<div class="heat-grid">{tiles}</div>
+</body></html>
+"""
+    components.html(html, height=frame_height, scrolling=False)
+
+
 def section_header(title: str, subtitle: str = "", price_as_of: str = "", updated_at: str = ""):
     if price_as_of:
         top_right = price_as_of

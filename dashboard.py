@@ -323,6 +323,24 @@ def safe_load(fn, *args):
             return None
 
 
+_HEATMAP_PERIODS = ["1D", "5D", "1M", "3M", "6M", "1Y", "3Y"]
+
+
+def heatmap_controls(key: str):
+    """Render the Table/Heatmap toggle + period selector. Returns
+    (view, period) where view is 'Table' or 'Heatmap'."""
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        view = st.radio("View", ["Table", "Heatmap"], horizontal=True,
+                        label_visibility="collapsed", key=f"view_{key}")
+    period = "5D"
+    if view == "Heatmap":
+        with c2:
+            period = st.selectbox("Color by", _HEATMAP_PERIODS, index=1,
+                                  key=f"period_{key}")
+    return view, period
+
+
 # ── Mobile nav (derived from the single-source NAV) ─────────
 # Map section key -> label for header lookups, and build the mobile
 # dropdown structure from NAV so it can never drift from the sidebar.
@@ -368,10 +386,17 @@ elif section == "S&P 500 Sectors":
     if df is None:
         ui.load_error()
     else:
-        df = df.drop(df.columns[1], axis=1)
-        df = ui.sort_by_keyword(df, "5d")
-        ui.render_stat_cards(df)
-        ui.render_table(df, bold_first_col=False)
+        df = df.drop(df.columns[1], axis=1)   # drop Ticker
+        view, period = heatmap_controls("sp500")
+        if view == "Heatmap":
+            pcol = ui.resolve_period_col(df, period)
+            df = ui.sort_by_keyword(df, period)
+            link = "__link__Sector" if "__link__Sector" in df.columns else None
+            ui.render_heatmap(df, df.columns[0], pcol, link_col=link)
+        else:
+            df = ui.sort_by_keyword(df, "5d")
+            ui.render_stat_cards(df)
+            ui.render_table(df, bold_first_col=False)
 
 elif section == "Additional NIFTY Sector Indices":
     res = safe_load(data.load_nifty_indices)
@@ -447,10 +472,17 @@ elif section == "NIFTY Sectors":
     if df is None:
         ui.load_error()
     else:
-        df = df.drop(df.columns[1], axis=1)
-        df = ui.sort_by_keyword(df, "5d")
-        ui.render_stat_cards(df.drop(df.columns[2], axis=1))   # exclude P/E from cards
-        ui.render_table(df, bold_first_col=False)
+        df = df.drop(df.columns[1], axis=1)   # drop Ticker
+        view, period = heatmap_controls("nifty_sectors")
+        if view == "Heatmap":
+            pcol = ui.resolve_period_col(df, period)
+            df = ui.sort_by_keyword(df, period)
+            link = "__link__Index" if "__link__Index" in df.columns else None
+            ui.render_heatmap(df, df.columns[0], pcol, link_col=link)
+        else:
+            df = ui.sort_by_keyword(df, "5d")
+            ui.render_stat_cards(df.drop(df.columns[2], axis=1))   # exclude P/E from cards
+            ui.render_table(df, bold_first_col=False)
 
 elif section == "ETFs US":
     df = safe_load(data.load_etfs_us)
