@@ -326,9 +326,21 @@ def safe_load(fn, *args):
 _HEATMAP_PERIODS = ["1D", "5D", "1M", "3M", "6M", "1Y", "3Y"]
 
 
+def _heatmap_supported() -> bool:
+    """True only if the ui module exposes the heatmap helpers. Guards
+    against a stale-module deploy on Streamlit Cloud where dashboard.py
+    is reloaded but the cached dashboard.ui predates these functions —
+    in that case we silently fall back to the table view instead of
+    crashing with an AttributeError."""
+    return all(hasattr(ui, attr) for attr in ("render_heatmap", "resolve_period_col"))
+
+
 def heatmap_controls(key: str):
     """Render the Table/Heatmap toggle + period selector. Returns
-    (view, period) where view is 'Table' or 'Heatmap'."""
+    (view, period) where view is 'Table' or 'Heatmap'. If the heatmap
+    helpers aren't available (stale module), only Table is offered."""
+    if not _heatmap_supported():
+        return "Table", "5D"
     c1, c2 = st.columns([1, 1])
     with c1:
         view = st.radio("View", ["Table", "Heatmap"], horizontal=True,
