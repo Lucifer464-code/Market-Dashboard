@@ -455,19 +455,19 @@ def render_live_market(firebase_config: dict):
   .kpi-grid {{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }}
   .kpi {{ background:white; border:1px solid #e2e8f0; border-radius:10px;
           padding:14px 16px; }}
-  .kpi-label {{ font-size:10px; color:var(--muted); font-weight:600;
-                text-transform:uppercase; letter-spacing:.8px; }}
+  .kpi-label {{ font-size:11px; color:#475569; font-weight:700;
+                text-transform:uppercase; letter-spacing:.6px; }}
   .kpi-val {{ font-size:22px; font-weight:700; margin-top:6px;
               font-variant-numeric:tabular-nums; }}
   .kpi-chg {{ font-size:12px; font-weight:600; margin-top:3px; }}
   .kpi-pts {{ font-size:11px; color:var(--muted); margin-top:2px; }}
   .up {{ color:var(--green); }} .down {{ color:var(--red); }}
-  .grid {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+  .grid {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr));
            gap:8px; }}
   .row {{ background:white; border:1px solid #e2e8f0; border-radius:10px;
           padding:12px 14px; display:flex; align-items:center; gap:10px; }}
-  .row .nm {{ font-size:13px; font-weight:600; flex:1; overflow:hidden;
-              text-overflow:ellipsis; white-space:nowrap; }}
+  .row .nm {{ font-size:13px; font-weight:600; flex:1; min-width:0;
+              white-space:normal; overflow-wrap:anywhere; line-height:1.25; }}
   .row .vl {{ font-size:13px; font-variant-numeric:tabular-nums; color:#334155; }}
   .row .pc {{ font-size:13px; font-weight:700; min-width:64px; text-align:right;
               font-variant-numeric:tabular-nums; }}
@@ -545,7 +545,7 @@ function renderRows(containerId,docs){{
   el.innerHTML=docs.map(s=>{{
     const p=s.change_pct||0, cls=p>=0?'up':'down', sign=p>=0?'+':'−';
     const val=s.value!=null?fmtPrice(s.value):'—';
-    return '<div class="row"><div class="nm">'+s.name+'</div><div class="vl">'+val+'</div>'+
+    return '<div class="row"><div class="nm" title="'+s.name+'">'+s.name+'</div><div class="vl">'+val+'</div>'+
            '<div class="pc '+cls+'">'+sign+Math.abs(p).toFixed(2)+'%</div></div>';
   }}).join('');
 }}
