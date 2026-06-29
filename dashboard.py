@@ -330,11 +330,11 @@ def safe_load(fn, *args):
 # non-secret identifiers below are used as defaults for any keys the secret
 # omits; without a configured apiKey the Live Market page shows a setup notice.
 _FIREBASE_WEB_CONFIG_DEFAULTS = {
-    "authDomain":        "stockpulse-e3c5f.firebaseapp.com",
-    "projectId":         "stockpulse-e3c5f",
-    "storageBucket":     "stockpulse-e3c5f.appspot.com",
-    "messagingSenderId": "837839164226",
-    "appId":             "1:837839164226:web:5c363f290b0b61afc66edb",
+    "authDomain":        "stockpulse-aa107.firebaseapp.com",
+    "projectId":         "stockpulse-aa107",
+    "storageBucket":     "stockpulse-aa107.firebasestorage.app",
+    "messagingSenderId": "971560924277",
+    "appId":             "1:971560924277:web:efadf939b3642af316343c",
 }
 
 
