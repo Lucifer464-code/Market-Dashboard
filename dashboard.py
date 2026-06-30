@@ -422,7 +422,6 @@ elif section == "Global Indices":
         ui.load_error()
     else:
         t1, _ = res
-        st.caption("Live price & 1D% · delayed ~15 min · updates every 30s")
         _live_global_table(t1)
 
 elif section == "Additional Global Indices":
@@ -434,7 +433,6 @@ elif section == "Additional Global Indices":
     else:
         _, t2 = res
         if not t2.empty:
-            st.caption("Live price & 1D% · delayed ~15 min · updates every 30s")
             _live_global_table(t2, height=600)
 
 elif section == "S&P 500 Sectors":
