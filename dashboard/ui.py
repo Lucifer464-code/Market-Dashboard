@@ -576,6 +576,14 @@ try {{
     components.html(html, height=720, scrolling=True)
 
 
+def live_price_as_of() -> str:
+    """'Price as on <today, IST>' — for pages whose values are fetched live
+    (so the header reflects today, not the sheet's last-write date)."""
+    from zoneinfo import ZoneInfo
+    now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    return f"Price as on {now.strftime('%b')} {now.day}, {now.year}"
+
+
 def section_header(title: str, subtitle: str = "", price_as_of: str = "", updated_at: str = ""):
     if price_as_of:
         top_right = price_as_of

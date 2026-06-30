@@ -416,9 +416,8 @@ if section == "Live Market":
 
 elif section == "Global Indices":
     res = safe_load(data.load_global_indices)
-    price_as_of, _ = data.load_stocks_metadata("Global Indices")
     ui.section_header("Global Indices", "Major market indices worldwide",
-                      price_as_of=price_as_of)
+                      price_as_of=ui.live_price_as_of())
     if res is None:
         ui.load_error()
     else:
@@ -428,9 +427,8 @@ elif section == "Global Indices":
 
 elif section == "Additional Global Indices":
     res = safe_load(data.load_global_indices)
-    price_as_of, _ = data.load_stocks_metadata("Global Indices")
     ui.section_header("Additional Global Indices", "More market indices worldwide",
-                      price_as_of=price_as_of)
+                      price_as_of=ui.live_price_as_of())
     if res is None:
         ui.load_error()
     else:
