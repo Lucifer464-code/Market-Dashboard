@@ -350,6 +350,16 @@ def firebase_web_config() -> dict:
     return {}
 
 
+def auto_refresh(interval_ms: int):
+    """Reload the page every interval_ms (no extra dependency). A tiny
+    self-reloading iframe triggers a full Streamlit rerun, which re-reads the
+    short-TTL live caches. Used by the live Global Indices pages."""
+    components.html(
+        f"<script>setTimeout(function(){{window.parent.location.reload();}}, {interval_ms});</script>",
+        height=0,
+    )
+
+
 _HEATMAP_PERIODS = ["1D", "5D", "1M", "3M", "6M", "1Y", "3Y"]
 
 
@@ -408,9 +418,12 @@ elif section == "Global Indices":
         ui.load_error()
     else:
         t1, _ = res
+        t1 = data.apply_global_live(t1, t1.columns[0])   # live Price + 1D%
+        st.caption("Live price & 1D% · delayed ~15 min · auto-refreshes every 30s")
         t1 = ui.sort_by_keyword(t1, "5d")
         ui.render_stat_cards(t1)
         ui.render_table(t1, bold_first_col=False)
+        auto_refresh(30000)
 
 elif section == "Additional Global Indices":
     res = safe_load(data.load_global_indices)
@@ -422,9 +435,12 @@ elif section == "Additional Global Indices":
     else:
         _, t2 = res
         if not t2.empty:
+            t2 = data.apply_global_live(t2, t2.columns[0])   # live Price + 1D%
+            st.caption("Live price & 1D% · delayed ~15 min · auto-refreshes every 30s")
             t2 = ui.sort_by_keyword(t2, "5d")
             ui.render_stat_cards(t2)
             ui.render_table(t2, height=600, bold_first_col=False)
+        auto_refresh(30000)
 
 elif section == "S&P 500 Sectors":
     df = safe_load(data.load_sp500_sectors)
