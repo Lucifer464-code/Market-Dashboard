@@ -350,21 +350,6 @@ def firebase_web_config() -> dict:
     return {}
 
 
-@st.fragment(run_every=30)
-def _live_global_table(base_df, height=None):
-    """Render one Global Indices table with live Price+1D%, re-running ONLY
-    this fragment every 30s (no full-page reload, scroll/position preserved).
-    base_df is the sheet DataFrame (loaded once outside the fragment); the
-    live merge + sort + render happen on each fragment rerun."""
-    df = data.apply_global_live(base_df, base_df.columns[0])
-    df = ui.sort_by_keyword(df, "5d")
-    ui.render_stat_cards(df)
-    if height:
-        ui.render_table(df, height=height, bold_first_col=False)
-    else:
-        ui.render_table(df, bold_first_col=False)
-
-
 _HEATMAP_PERIODS = ["1D", "5D", "1M", "3M", "6M", "1Y", "3Y"]
 
 
@@ -416,24 +401,30 @@ if section == "Live Market":
 
 elif section == "Global Indices":
     res = safe_load(data.load_global_indices)
+    price_as_of, _ = data.load_stocks_metadata("Global Indices")
     ui.section_header("Global Indices", "Major market indices worldwide",
-                      price_as_of=ui.live_price_as_of())
+                      price_as_of=price_as_of)
     if res is None:
         ui.load_error()
     else:
         t1, _ = res
-        _live_global_table(t1)
+        t1 = ui.sort_by_keyword(t1, "5d")
+        ui.render_stat_cards(t1)
+        ui.render_table(t1, bold_first_col=False)
 
 elif section == "Additional Global Indices":
     res = safe_load(data.load_global_indices)
+    price_as_of, _ = data.load_stocks_metadata("Global Indices")
     ui.section_header("Additional Global Indices", "More market indices worldwide",
-                      price_as_of=ui.live_price_as_of())
+                      price_as_of=price_as_of)
     if res is None:
         ui.load_error()
     else:
         _, t2 = res
         if not t2.empty:
-            _live_global_table(t2, height=600)
+            t2 = ui.sort_by_keyword(t2, "5d")
+            ui.render_stat_cards(t2)
+            ui.render_table(t2, height=600, bold_first_col=False)
 
 elif section == "S&P 500 Sectors":
     df = safe_load(data.load_sp500_sectors)
