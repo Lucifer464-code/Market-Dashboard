@@ -350,14 +350,19 @@ def firebase_web_config() -> dict:
     return {}
 
 
-def auto_refresh(interval_ms: int):
-    """Reload the page every interval_ms (no extra dependency). A tiny
-    self-reloading iframe triggers a full Streamlit rerun, which re-reads the
-    short-TTL live caches. Used by the live Global Indices pages."""
-    components.html(
-        f"<script>setTimeout(function(){{window.parent.location.reload();}}, {interval_ms});</script>",
-        height=0,
-    )
+@st.fragment(run_every=30)
+def _live_global_table(base_df, height=None):
+    """Render one Global Indices table with live Price+1D%, re-running ONLY
+    this fragment every 30s (no full-page reload, scroll/position preserved).
+    base_df is the sheet DataFrame (loaded once outside the fragment); the
+    live merge + sort + render happen on each fragment rerun."""
+    df = data.apply_global_live(base_df, base_df.columns[0])
+    df = ui.sort_by_keyword(df, "5d")
+    ui.render_stat_cards(df)
+    if height:
+        ui.render_table(df, height=height, bold_first_col=False)
+    else:
+        ui.render_table(df, bold_first_col=False)
 
 
 _HEATMAP_PERIODS = ["1D", "5D", "1M", "3M", "6M", "1Y", "3Y"]
@@ -418,12 +423,8 @@ elif section == "Global Indices":
         ui.load_error()
     else:
         t1, _ = res
-        t1 = data.apply_global_live(t1, t1.columns[0])   # live Price + 1D%
-        st.caption("Live price & 1D% · delayed ~15 min · auto-refreshes every 30s")
-        t1 = ui.sort_by_keyword(t1, "5d")
-        ui.render_stat_cards(t1)
-        ui.render_table(t1, bold_first_col=False)
-        auto_refresh(30000)
+        st.caption("Live price & 1D% · delayed ~15 min · updates every 30s")
+        _live_global_table(t1)
 
 elif section == "Additional Global Indices":
     res = safe_load(data.load_global_indices)
@@ -435,12 +436,8 @@ elif section == "Additional Global Indices":
     else:
         _, t2 = res
         if not t2.empty:
-            t2 = data.apply_global_live(t2, t2.columns[0])   # live Price + 1D%
-            st.caption("Live price & 1D% · delayed ~15 min · auto-refreshes every 30s")
-            t2 = ui.sort_by_keyword(t2, "5d")
-            ui.render_stat_cards(t2)
-            ui.render_table(t2, height=600, bold_first_col=False)
-        auto_refresh(30000)
+            st.caption("Live price & 1D% · delayed ~15 min · updates every 30s")
+            _live_global_table(t2, height=600)
 
 elif section == "S&P 500 Sectors":
     df = safe_load(data.load_sp500_sectors)
