@@ -321,12 +321,30 @@ class YahooDataEngine:
         end_date   = datetime.now()
         start_date = end_date - relativedelta(years=4)
 
-        data = yf.download(
-            symbols,
-            start       = start_date,
-            auto_adjust = True,
-            progress    = False,
-        )
+        # Retry the batch download — a single transient yfinance failure would
+        # otherwise return empty and stamp NA across the whole sheet.
+        data = None
+        for attempt in range(3):
+            try:
+                data = yf.download(
+                    symbols,
+                    start       = start_date,
+                    auto_adjust = True,
+                    progress    = False,
+                )
+                if data is not None and not data.empty:
+                    break
+            except Exception as e:
+                print(f"  [WARN] {sheet_name} download attempt {attempt + 1} failed: {e}")
+            if attempt < 2:
+                time.sleep(2 * (attempt + 1))
+
+        # If the batch ultimately failed/empty, skip the write so we don't
+        # wipe the sheet with NA — leave the prior values in place.
+        if data is None or data.empty:
+            print(f"  [SKIP] {sheet_name}: yfinance returned no data after retries; "
+                  f"leaving existing values.")
+            return
 
         start_col_index = ord(output_start_col) - ord("A")
         end_col_letter  = chr(start_col_index + 7 + ord("A"))
