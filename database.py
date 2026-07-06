@@ -1443,6 +1443,19 @@ _LEVERAGED_THEME_RULES = [
 ]
 
 
+def _num_or_str(v):
+    """Coerce a numeric-looking cell string to float so the sheet stores it as
+    a real number (enabling '0.00' format + green/red conditional formatting,
+    matching the other tabs). Non-numeric values (e.g. 'NA') pass through."""
+    s = str(v).strip()
+    if s in ("", "NA", "N/A", "-"):
+        return s
+    try:
+        return float(s.replace("%", "").replace("+", "").replace(",", ""))
+    except (ValueError, TypeError):
+        return v
+
+
 def _classify_leveraged_theme(name: str) -> str:
     """Classify a leveraged fund into a theme/sector bucket from its name."""
     n = (name or "").lower()
@@ -1634,7 +1647,8 @@ class ManualETFEngine:
             except (ValueError, TypeError):
                 five_d = float("-inf")
             out_rows.append((sector, five_d,
-                             [sector, ticker, name, aum, price] + rets))
+                             [sector, ticker, name, aum, _num_or_str(price)]
+                             + [_num_or_str(x) for x in rets]))
 
         # Sort: Sector asc, then 5D desc
         out_rows.sort(key=lambda x: (x[0], -x[1]))
@@ -1696,7 +1710,8 @@ class ManualETFEngine:
             except (ValueError, TypeError):
                 five_d = float("-inf")
             out_rows.append((theme, five_d,
-                             [theme, leverage, ticker, name, aum, price] + rets))
+                             [theme, leverage, ticker, name, aum, _num_or_str(price)]
+                             + [_num_or_str(x) for x in rets]))
 
         if not out_rows:
             print("  [SKIP] No leveraged fund rows to classify.")
