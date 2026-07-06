@@ -1443,6 +1443,75 @@ _LEVERAGED_THEME_RULES = [
 ]
 
 
+# The 11 GICS sectors — the only buckets that count as a "sector" for the
+# leader boards (broad/style buckets like Value/Growth/International excluded).
+_GICS_SECTORS = {
+    "Technology", "Financials", "Energy", "Healthcare", "Industrials",
+    "Materials", "Utilities", "Real Estate", "Communication Services",
+    "Consumer Discretionary", "Consumer Staples",
+}
+
+
+def _to_float(v):
+    """Parse a return/price cell to float; None if not numeric."""
+    s = str(v).strip()
+    if s in ("", "NA", "N/A", "-"):
+        return None
+    try:
+        return float(s.replace("%", "").replace("+", "").replace(",", ""))
+    except (ValueError, TypeError):
+        return None
+
+
+def sector_leaders(rows, sector_idx, returns_idx, top_n=3):
+    """Rank the ETFs within each GICS sector by consistency across all return
+    periods and return the top N per sector.
+
+    rows        : list of row lists (already sector-classified)
+    sector_idx  : index of the sector/theme column in each row
+    returns_idx : list of column indices holding the return values (1D..3Y)
+    Returns: list of (rank, row) for the top N of each GICS sector, ordered by
+    sector then rank. "Consistency" = average rank across the return periods
+    (an ETF ranking high in MOST periods wins). Ties broken by mean return.
+    """
+    from collections import defaultdict
+
+    by_sector = defaultdict(list)
+    for row in rows:
+        sec = str(row[sector_idx]).strip()
+        if sec in _GICS_SECTORS:
+            by_sector[sec].append(row)
+
+    out = []
+    for sec in sorted(by_sector):
+        group = by_sector[sec]
+        # Numeric returns per row (None → treated as worst for that period)
+        vals = {id(r): [_to_float(r[i]) for i in returns_idx] for r in group}
+
+        # For each period, rank rows (1 = best). Missing values rank last.
+        n_periods = len(returns_idx)
+        rank_sum = {id(r): 0.0 for r in group}
+        for p in range(n_periods):
+            ordered = sorted(
+                group,
+                key=lambda r: (vals[id(r)][p] is None, -(vals[id(r)][p] or 0)),
+            )
+            for pos, r in enumerate(ordered, start=1):
+                rank_sum[id(r)] += pos
+
+        def mean_ret(r):
+            nums = [x for x in vals[id(r)] if x is not None]
+            return sum(nums) / len(nums) if nums else float("-inf")
+
+        ranked = sorted(
+            group,
+            key=lambda r: (rank_sum[id(r)] / n_periods, -mean_ret(r)),
+        )
+        for rank, r in enumerate(ranked[:top_n], start=1):
+            out.append((rank, r))
+    return out
+
+
 def _num_or_str(v):
     """Coerce a numeric-looking cell string to float so the sheet stores it as
     a real number (enabling '0.00' format + green/red conditional formatting,
@@ -1738,6 +1807,77 @@ class ManualETFEngine:
         print(f"{self.LEVERAGED_THEME_TAB}: wrote {len(data)} funds across "
               f"{len({r[0] for r in out_rows})} themes\n")
 
+    ETF_LEADERS_TAB       = "ETFs US Sector Leaders"
+    LEVERAGED_LEADERS_TAB = "Leveraged Sector Leaders"
+    LEADERS_TOP_N         = 3
+
+    def build_etf_sector_leaders_tab(self):
+        """Top N ETFs per GICS sector from 'ETFs US by Sector', ranked by
+        consistency across all return periods. Writes
+        [Sector, Rank, Ticker, Name, AUM, Price, 1D..3Y]."""
+        self._build_leaders(
+            src_tab=self.SECTOR_TAB, out_tab=self.ETF_LEADERS_TAB,
+            src_range="A4:L400",
+            # src cols: Sector0 Ticker1 Name2 AUM3 Price4 1D5..3Y11
+            sector_idx=0, returns_idx=list(range(5, 12)),
+            out_header=["Sector", "Rank", "Ticker", "Name", "AUM", "Price",
+                        "1D", "5D", "1M", "3M", "6M", "1Y", "3Y"],
+            row_builder=lambda rank, r: [r[0], rank, r[1], r[2], r[3],
+                                         _num_or_str(r[4])]
+                                        + [_num_or_str(x) for x in r[5:12]],
+            width="M",
+        )
+
+    def build_leveraged_sector_leaders_tab(self):
+        """Top N leveraged funds per GICS sector from 'Leveraged Funds by
+        Theme'. Writes [Sector, Rank, Leverage, Ticker, Name, AUM, Price, 1D..3Y]."""
+        self._build_leaders(
+            src_tab=self.LEVERAGED_THEME_TAB, out_tab=self.LEVERAGED_LEADERS_TAB,
+            src_range="A4:M400",
+            # src cols: Theme0 Leverage1 Ticker2 Name3 AUM4 Price5 1D6..3Y12
+            sector_idx=0, returns_idx=list(range(6, 13)),
+            out_header=["Sector", "Rank", "Leverage", "Ticker", "Name", "AUM",
+                        "Price", "1D", "5D", "1M", "3M", "6M", "1Y", "3Y"],
+            row_builder=lambda rank, r: [r[0], rank, r[1], r[2], r[3], r[4],
+                                         _num_or_str(r[5])]
+                                        + [_num_or_str(x) for x in r[6:13]],
+            width="N",
+        )
+
+    def _build_leaders(self, src_tab, out_tab, src_range, sector_idx,
+                       returns_idx, out_header, row_builder, width):
+        print(f"Building {out_tab}...")
+        try:
+            ws_out = self.sheet_client.get_worksheet(out_tab)
+        except Exception:
+            print(f"  [SKIP] Worksheet '{out_tab}' not found — "
+                  f"create an empty tab with that exact name first.")
+            return
+        src = self.sheet_client.get_worksheet(src_tab)
+        rows = [list(r) for r in src.get(src_range) if r and str(r[0]).strip()]
+        if not rows:
+            print(f"  [SKIP] No rows in '{src_tab}'.")
+            return
+
+        leaders = sector_leaders(rows, sector_idx, returns_idx,
+                                 top_n=self.LEADERS_TOP_N)
+        data = [row_builder(rank, r) for rank, r in leaders]
+
+        end_row = 3 + len(data)
+        ws_out.batch_clear([f"A3:{width}400"])
+        updates = [{"range": f"A3:{width}3", "values": [out_header]}]
+        if data:
+            updates.append({"range": f"A4:{width}{end_row}", "values": data})
+        self.sheet_client.batch_update(ws_out, updates)
+
+        price_as_of, updated_at = _make_metadata("US")
+        self.sheet_client.batch_update(ws_out, [
+            {"range": "A1", "values": [[price_as_of]]},
+            {"range": "A2", "values": [[updated_at]]},
+        ])
+        print(f"{out_tab}: wrote {len(data)} leaders across "
+              f"{len({r[0] for r in data})} sectors\n")
+
     def update_all(self):
         for sheet_name, cfg in self.SHEET_CONFIGS.items():
             try:
@@ -1754,6 +1894,15 @@ class ManualETFEngine:
             self.build_leveraged_theme_tab()
         except Exception as e:
             print(f"  [ERROR] {self.LEVERAGED_THEME_TAB} build failed: {e}")
+        # Sector-leader boards (top N per GICS sector) — after the by-sector tabs
+        try:
+            self.build_etf_sector_leaders_tab()
+        except Exception as e:
+            print(f"  [ERROR] {self.ETF_LEADERS_TAB} build failed: {e}")
+        try:
+            self.build_leveraged_sector_leaders_tab()
+        except Exception as e:
+            print(f"  [ERROR] {self.LEVERAGED_LEADERS_TAB} build failed: {e}")
 
 
 # ======================================================
