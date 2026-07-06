@@ -1409,6 +1409,40 @@ def classify_etf_sectors(tickers: list) -> dict:
     return {t.upper(): cache.get(t.upper(), "Other") for t in tickers}
 
 
+# Ordered keyword rules for classifying a LEVERAGED fund into a theme by its
+# NAME (yfinance can't sector-classify these). Order matters: first bucket
+# whose keywords match wins. Pure string logic — no network.
+_LEVERAGED_THEME_RULES = [
+    ("Commodity", ["gold", "miner", "oil", "silver", " gas", "natural gas",
+                   "mlp", "platinum", "uranium", "commodit"]),
+    ("Factor/Dividend", ["factor", "dividend", "volatility", "quality",
+                         "momentum", "high dividend"]),
+    ("Sector/Thematic", ["financ", "bank", "biotech", "semiconductor", "pharma",
+                         "medical", "aerospace", "defense", "defence", "consumer",
+                         "transportation", "travel", "robotic",
+                         "artificial intelligence", "fang", "cloud", "internet",
+                         "cyber", "auto", "bdc", "real estate", "utilit",
+                         "energy", "health", "industr", "communication",
+                         "retail", "homebuild", "innovation", "mstr", "coin"]),
+    ("Index", ["s&p", "nasdaq", "qqq", "dow", "russell", "ftse", "msci", "eafe",
+               "csi", "stoxx", "nifty", "emerging", "small cap", "smallcap",
+               "mid cap", "midcap", "large cap", "total market"]),
+]
+
+
+def _classify_leveraged_theme(name: str) -> str:
+    """Classify a leveraged fund into a theme bucket from its name."""
+    n = (name or "").lower()
+    if not n:
+        return "Other"
+    for bucket, keywords in _LEVERAGED_THEME_RULES:
+        if any(k in n for k in keywords):
+            return bucket
+    if re.search(r"\b(long|bull|ultra)\b", n):
+        return "Single Stock"
+    return "Other"
+
+
 # ======================================================
 # MANUAL ETF SHEETS — PRICE/RETURNS REFRESH + 5D SORT
 # ======================================================
@@ -1612,6 +1646,70 @@ class ManualETFEngine:
         print(f"{self.SECTOR_TAB}: wrote {len(data)} ETFs across "
               f"{len({r[0] for r in out_rows})} sectors\n")
 
+    LEVERAGED_THEME_TAB = "Leveraged Funds by Theme"
+
+    def build_leveraged_theme_tab(self):
+        """Read the (just-refreshed) leveraged fund rows, classify each into a
+        theme bucket from its name, and write 'Leveraged Funds by Theme':
+            [Theme, Leverage, Ticker, Name, AUM, Price, 1D, 5D, 1M, 3M, 6M, 1Y, 3Y]
+        sorted by Theme then 5D desc. The user creates the (empty) tab once."""
+        print(f"Building {self.LEVERAGED_THEME_TAB}...")
+        try:
+            ws_out = self.sheet_client.get_worksheet(self.LEVERAGED_THEME_TAB)
+        except Exception:
+            print(f"  [SKIP] Worksheet '{self.LEVERAGED_THEME_TAB}' not found — "
+                  f"create an empty tab with that exact name first.")
+            return
+
+        src = self.sheet_client.get_worksheet("Biggest Leveraged Funds ")
+        # Leveraged layout: Ticker=A, Name=B, Leverage=C, AUM(formatted)=E,
+        # Price=F, returns G..M. Data starts row 7.
+        rows = src.get("A7:M122")
+
+        out_rows = []
+        for r in rows:
+            r = list(r) + [""] * (13 - len(r))    # pad to A..M width
+            ticker = (r[0] or "").strip()
+            if not ticker:
+                continue
+            name     = (r[1] or "").strip()       # B
+            leverage = (r[2] or "").strip()       # C
+            aum      = (r[4] or "").strip()       # E (formatted AUM)
+            price    = (r[5] or "").strip()       # F
+            rets     = [(r[6 + i] or "").strip() for i in range(7)]  # G..M
+            theme    = _classify_leveraged_theme(name)
+            try:
+                five_d = float(str(rets[1]).replace("%", "").replace("+", ""))
+            except (ValueError, TypeError):
+                five_d = float("-inf")
+            out_rows.append((theme, five_d,
+                             [theme, leverage, ticker, name, aum, price] + rets))
+
+        if not out_rows:
+            print("  [SKIP] No leveraged fund rows to classify.")
+            return
+
+        out_rows.sort(key=lambda x: (x[0], -x[1]))
+        data = [r[2] for r in out_rows]
+
+        header = ["Theme", "Leverage", "Ticker", "Name", "AUM", "Price",
+                  "1D", "5D", "1M", "3M", "6M", "1Y", "3Y"]
+
+        ws_out.batch_clear(["A3:M400"])
+        end_row = 3 + len(data)
+        updates = [{"range": "A3:M3", "values": [header]}]
+        if data:
+            updates.append({"range": f"A4:M{end_row}", "values": data})
+        self.sheet_client.batch_update(ws_out, updates)
+
+        price_as_of, updated_at = _make_metadata("US")
+        self.sheet_client.batch_update(ws_out, [
+            {"range": "A1", "values": [[price_as_of]]},
+            {"range": "A2", "values": [[updated_at]]},
+        ])
+        print(f"{self.LEVERAGED_THEME_TAB}: wrote {len(data)} funds across "
+              f"{len({r[0] for r in out_rows})} themes\n")
+
     def update_all(self):
         for sheet_name, cfg in self.SHEET_CONFIGS.items():
             try:
@@ -1623,6 +1721,11 @@ class ManualETFEngine:
             self.build_sector_tab()
         except Exception as e:
             print(f"  [ERROR] {self.SECTOR_TAB} build failed: {e}")
+        # Derive the theme view from the just-refreshed Leveraged list
+        try:
+            self.build_leveraged_theme_tab()
+        except Exception as e:
+            print(f"  [ERROR] {self.LEVERAGED_THEME_TAB} build failed: {e}")
 
 
 # ======================================================
