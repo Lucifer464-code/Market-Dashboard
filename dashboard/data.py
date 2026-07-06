@@ -292,15 +292,15 @@ def load_leveraged_by_theme():
 @st.cache_data(ttl=28800)
 def load_etf_sector_leaders():
     ws = _ws("ETFs US Sector Leaders")
-    # Cols: Sector, Rank, Ticker, Name, AUM, Price, 1D..3Y.
-    return _range_to_df(ws, "A3:M400", header_idx=0)
+    # Cols: Sector, Ticker, Name, AUM, Price, 1D..3Y.
+    return _range_to_df(ws, "A3:L400", header_idx=0)
 
 
 @st.cache_data(ttl=28800)
 def load_leveraged_sector_leaders():
     ws = _ws("Leveraged Sector Leaders")
-    # Cols: Sector, Rank, Leverage, Ticker, Name, AUM, Price, 1D..3Y.
-    return _range_to_df(ws, "A3:N400", header_idx=0)
+    # Cols: Sector, Leverage, Ticker, Name, AUM, Price, 1D..3Y.
+    return _range_to_df(ws, "A3:M400", header_idx=0)
 
 
 @st.cache_data(ttl=28800)

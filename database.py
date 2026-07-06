@@ -1809,39 +1809,39 @@ class ManualETFEngine:
 
     ETF_LEADERS_TAB       = "ETFs US Sector Leaders"
     LEVERAGED_LEADERS_TAB = "Leveraged Sector Leaders"
-    LEADERS_TOP_N         = 3
+    LEADERS_TOP_N         = 1   # single top performer per GICS sector
 
     def build_etf_sector_leaders_tab(self):
-        """Top N ETFs per GICS sector from 'ETFs US by Sector', ranked by
+        """Top ETF per GICS sector from 'ETFs US by Sector', ranked by
         consistency across all return periods. Writes
-        [Sector, Rank, Ticker, Name, AUM, Price, 1D..3Y]."""
+        [Sector, Ticker, Name, AUM, Price, 1D..3Y]."""
         self._build_leaders(
             src_tab=self.SECTOR_TAB, out_tab=self.ETF_LEADERS_TAB,
             src_range="A4:L400",
             # src cols: Sector0 Ticker1 Name2 AUM3 Price4 1D5..3Y11
             sector_idx=0, returns_idx=list(range(5, 12)),
-            out_header=["Sector", "Rank", "Ticker", "Name", "AUM", "Price",
+            out_header=["Sector", "Ticker", "Name", "AUM", "Price",
                         "1D", "5D", "1M", "3M", "6M", "1Y", "3Y"],
-            row_builder=lambda rank, r: [r[0], rank, r[1], r[2], r[3],
+            row_builder=lambda rank, r: [r[0], r[1], r[2], r[3],
                                          _num_or_str(r[4])]
                                         + [_num_or_str(x) for x in r[5:12]],
-            width="M",
+            width="L",
         )
 
     def build_leveraged_sector_leaders_tab(self):
-        """Top N leveraged funds per GICS sector from 'Leveraged Funds by
-        Theme'. Writes [Sector, Rank, Leverage, Ticker, Name, AUM, Price, 1D..3Y]."""
+        """Top leveraged fund per GICS sector from 'Leveraged Funds by Theme'.
+        Writes [Sector, Leverage, Ticker, Name, AUM, Price, 1D..3Y]."""
         self._build_leaders(
             src_tab=self.LEVERAGED_THEME_TAB, out_tab=self.LEVERAGED_LEADERS_TAB,
             src_range="A4:M400",
             # src cols: Theme0 Leverage1 Ticker2 Name3 AUM4 Price5 1D6..3Y12
             sector_idx=0, returns_idx=list(range(6, 13)),
-            out_header=["Sector", "Rank", "Leverage", "Ticker", "Name", "AUM",
+            out_header=["Sector", "Leverage", "Ticker", "Name", "AUM",
                         "Price", "1D", "5D", "1M", "3M", "6M", "1Y", "3Y"],
-            row_builder=lambda rank, r: [r[0], rank, r[1], r[2], r[3], r[4],
+            row_builder=lambda rank, r: [r[0], r[1], r[2], r[3], r[4],
                                          _num_or_str(r[5])]
                                         + [_num_or_str(x) for x in r[6:13]],
-            width="N",
+            width="M",
         )
 
     def _build_leaders(self, src_tab, out_tab, src_range, sector_idx,
