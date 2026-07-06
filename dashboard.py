@@ -245,10 +245,8 @@ NAV = {
     ],
     "FUNDS": [
         ("ETFs US",                    "ETFs US"),
-        ("ETFs US by Sector",          "ETFs US by Sector"),
         ("ETFs US Sector Leaders",     "ETFs US Sector Leaders"),
         ("Leveraged Funds",            "Leveraged Funds"),
-        ("Leveraged Funds by Theme",   "Leveraged Funds by Theme"),
         ("Leveraged Sector Leaders",   "Leveraged Sector Leaders"),
         ("ETFs India",                 "ETFs India"),
         ("Commodity ETFs",             "Commodity ETFs"),
@@ -547,25 +545,6 @@ elif section == "ETFs US":
         df = df.drop(df.columns[2], axis=1)
         ui.render_table(df, height=620, searchable=True)
 
-elif section == "ETFs US by Sector":
-    df = safe_load(data.load_etfs_us_by_sector)
-    price_as_of, _ = data.load_stocks_metadata("ETFs US by Sector")
-    ui.section_header("ETFs US by Sector", "US ETFs grouped by sector / style",
-                      price_as_of=price_as_of)
-    if df is None:
-        ui.load_error()
-    elif df.empty:
-        st.info("No data available.")
-    else:
-        sectors = sorted(df["Sector"].dropna().unique()) if "Sector" in df.columns else []
-        choice = st.selectbox("Sector", ["All sectors"] + sectors)
-        if choice != "All sectors" and "Sector" in df.columns:
-            view = df[df["Sector"] == choice].drop(columns=["Sector"])
-        else:
-            view = df
-        st.caption(f"{len(view)} ETF{'s' if len(view) != 1 else ''}")
-        ui.render_table(view, height=620, bold_first_col=False, searchable=True)
-
 elif section == "ETFs US Sector Leaders":
     df = safe_load(data.load_etf_sector_leaders)
     price_as_of, _ = data.load_stocks_metadata("ETFs US Sector Leaders")
@@ -593,34 +572,6 @@ elif section == "Leveraged Funds":
     else:
         df = df.drop(df.columns[3], axis=1)
         ui.render_table(df, searchable=True)
-
-elif section == "Leveraged Funds by Theme":
-    df = safe_load(data.load_leveraged_by_theme)
-    price_as_of, _ = data.load_stocks_metadata("Leveraged Funds by Theme")
-    ui.section_header("Leveraged Funds by Theme",
-                      "Leveraged ETFs grouped by theme & leverage",
-                      price_as_of=price_as_of)
-    if df is None:
-        ui.load_error()
-    elif df.empty:
-        st.info("No data available.")
-    else:
-        c1, c2 = st.columns(2)
-        with c1:
-            lev = st.selectbox("Leverage", ["All leverage"] +
-                               (sorted(df["Leverage"].dropna().unique())
-                                if "Leverage" in df.columns else []))
-        with c2:
-            theme = st.selectbox("Theme", ["All themes"] +
-                                 (sorted(df["Theme"].dropna().unique())
-                                  if "Theme" in df.columns else []))
-        view = df
-        if lev != "All leverage" and "Leverage" in view.columns:
-            view = view[view["Leverage"] == lev]
-        if theme != "All themes" and "Theme" in view.columns:
-            view = view[view["Theme"] == theme]
-        st.caption(f"{len(view)} fund{'s' if len(view) != 1 else ''}")
-        ui.render_table(view, height=620, bold_first_col=False, searchable=True)
 
 elif section == "Leveraged Sector Leaders":
     df = safe_load(data.load_leveraged_sector_leaders)
