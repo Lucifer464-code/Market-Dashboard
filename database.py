@@ -1307,6 +1307,109 @@ class SP500SectorsEngine:
 
 
 # ======================================================
+# ETF SECTOR / CATEGORY CLASSIFICATION
+# ======================================================
+
+# Map yfinance "category" (Morningstar fund category) → a display bucket that
+# fits the ETFs US list. GICS sectors where the ETF is a true sector play,
+# plus broad style/regional buckets (most of the list is broad-market). Keys
+# are lowercase; lookups are case-insensitive. Anything unmapped → "Other".
+_ETF_CATEGORY_TO_BUCKET = {
+    # ── GICS sectors ──
+    "technology":                 "Technology",
+    "health":                     "Healthcare",
+    "financial":                  "Financials",
+    "equity energy":              "Energy",
+    "energy limited partnership": "Energy",
+    "industrials":                "Industrials",
+    "utilities":                  "Utilities",
+    "real estate":                "Real Estate",
+    "communications":             "Communication Services",
+    "consumer cyclical":          "Consumer Discretionary",
+    "consumer defensive":         "Consumer Staples",
+    "equity precious metals":     "Materials",
+    "natural resources":          "Materials",
+    "infrastructure":             "Infrastructure",
+    # ── Broad / style ──
+    "large blend":    "US Broad Market",
+    "mid-cap blend":  "US Broad Market",
+    "small blend":    "US Broad Market",
+    "large value":    "Value",
+    "mid-cap value":  "Value",
+    "small value":    "Value",
+    "derivative income": "Value",
+    "large growth":   "Growth",
+    "mid-cap growth": "Growth",
+    "small growth":   "Growth",
+    # ── International ──
+    "foreign large blend":     "International",
+    "foreign large value":     "International",
+    "foreign large growth":    "International",
+    "foreign small/mid blend": "International",
+    "foreign small/mid value": "International",
+    "europe stock":            "International",
+    "japan stock":             "International",
+    "focused region":          "International",
+    "global large-stock blend":  "International",
+    "global large-stock growth": "International",
+    # ── Emerging markets ──
+    "diversified emerging mkts": "Emerging Markets",
+    "india equity":              "Emerging Markets",
+}
+
+_ETF_SECTOR_CACHE_FILE = "etf_sectors.csv"
+
+
+def _load_etf_sector_cache() -> dict:
+    """{ticker: bucket} from the CSV cache; {} if absent/unreadable."""
+    if not os.path.exists(_ETF_SECTOR_CACHE_FILE):
+        return {}
+    try:
+        out = {}
+        with open(_ETF_SECTOR_CACHE_FILE, "r", encoding="utf-8", newline="") as f:
+            for row in csv.reader(f):
+                if len(row) >= 2 and row[0].strip():
+                    out[row[0].strip().upper()] = row[1].strip()
+        return out
+    except Exception:
+        return {}
+
+
+def _save_etf_sector_cache(mapping: dict):
+    try:
+        with open(_ETF_SECTOR_CACHE_FILE, "w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f)
+            for t, s in sorted(mapping.items()):
+                w.writerow([t, s])
+    except Exception as e:
+        print(f"  [WARN] could not save ETF sector cache: {e}")
+
+
+def _classify_etf_sector(ticker: str) -> str:
+    """yfinance category → display bucket. 'Other' on any failure/unmapped."""
+    try:
+        cat = (yf.Ticker(ticker).info.get("category") or "").lower().strip()
+    except Exception:
+        return "Other"
+    return _ETF_CATEGORY_TO_BUCKET.get(cat, "Other")
+
+
+def classify_etf_sectors(tickers: list) -> dict:
+    """Return {ticker_upper: bucket} for all tickers, using the CSV cache and
+    only looking up (in parallel) the ones not already cached. Persists the
+    updated cache."""
+    cache = _load_etf_sector_cache()
+    missing = [t for t in tickers if t.upper() not in cache]
+    if missing:
+        print(f"  Classifying {len(missing)} new ETF(s) by sector...")
+        with ThreadPoolExecutor(max_workers=12) as pool:
+            for t, sector in zip(missing, pool.map(_classify_etf_sector, missing)):
+                cache[t.upper()] = sector
+        _save_etf_sector_cache(cache)
+    return {t.upper(): cache.get(t.upper(), "Other") for t in tickers}
+
+
+# ======================================================
 # MANUAL ETF SHEETS — PRICE/RETURNS REFRESH + 5D SORT
 # ======================================================
 
@@ -1437,12 +1540,89 @@ class ManualETFEngine:
 
         print(f"{sheet_name} (manual) updated OK\n")
 
+    SECTOR_TAB = "ETFs US by Sector"
+
+    def build_sector_tab(self):
+        """Read the (just-refreshed) ETFs US rows, classify each ETF into a
+        sector/style bucket, and write the 'ETFs US by Sector' tab:
+            [Sector, Ticker, Name, AUM, Price, 1D, 5D, 1M, 3M, 6M, 1Y, 3Y]
+        sorted by Sector then 5D desc. The user creates the (empty) tab once;
+        this populates it."""
+        print(f"Building {self.SECTOR_TAB}...")
+        try:
+            ws_out = self.sheet_client.get_worksheet(self.SECTOR_TAB)
+        except Exception:
+            print(f"  [SKIP] Worksheet '{self.SECTOR_TAB}' not found — "
+                  f"create an empty tab with that exact name first.")
+            return
+
+        src = self.sheet_client.get_worksheet("ETFs US")
+        # ETFs US: Ticker=B, Name=C, AUM(formatted)=E, Price=F, returns G:M
+        rows = src.get("B3:M202")
+
+        out_rows = []
+        raw = []  # (ticker, name, aum, price, [7 returns])
+        for r in rows:
+            r = list(r) + [""] * (12 - len(r))   # pad to B..M width
+            ticker = (r[0] or "").strip()
+            if not ticker:
+                continue
+            name  = (r[1] or "").strip()          # C
+            aum   = (r[3] or "").strip()          # E (formatted AUM)
+            price = (r[4] or "").strip()          # F
+            rets  = [(r[5 + i] or "").strip() for i in range(7)]  # G..M (1D..3Y)
+            raw.append((ticker, name, aum, price, rets))
+
+        if not raw:
+            print("  [SKIP] No ETFs US rows to classify.")
+            return
+
+        sectors = classify_etf_sectors([t for t, *_ in raw])
+
+        for ticker, name, aum, price, rets in raw:
+            sector = sectors.get(ticker.upper(), "Other")
+            # 5D (rets[1]) numeric for sort
+            try:
+                five_d = float(str(rets[1]).replace("%", "").replace("+", ""))
+            except (ValueError, TypeError):
+                five_d = float("-inf")
+            out_rows.append((sector, five_d,
+                             [sector, ticker, name, aum, price] + rets))
+
+        # Sort: Sector asc, then 5D desc
+        out_rows.sort(key=lambda x: (x[0], -x[1]))
+        data = [r[2] for r in out_rows]
+
+        header = ["Sector", "Ticker", "Name", "AUM", "Price",
+                  "1D", "5D", "1M", "3M", "6M", "1Y", "3Y"]
+
+        # Clear a generous data area, then write header (row 3) + data (row 4+)
+        ws_out.batch_clear(["A3:L400"])
+        end_row = 3 + len(data)
+        updates = [{"range": "A3:L3", "values": [header]}]
+        if data:
+            updates.append({"range": f"A4:L{end_row}", "values": data})
+        self.sheet_client.batch_update(ws_out, updates)
+
+        price_as_of, updated_at = _make_metadata("US")
+        self.sheet_client.batch_update(ws_out, [
+            {"range": "A1", "values": [[price_as_of]]},
+            {"range": "A2", "values": [[updated_at]]},
+        ])
+        print(f"{self.SECTOR_TAB}: wrote {len(data)} ETFs across "
+              f"{len({r[0] for r in out_rows})} sectors\n")
+
     def update_all(self):
         for sheet_name, cfg in self.SHEET_CONFIGS.items():
             try:
                 self._update_sheet(sheet_name, cfg)
             except Exception as e:
                 print(f"  [ERROR] {sheet_name} manual update failed: {e}")
+        # Derive the sector view from the just-refreshed ETFs US list
+        try:
+            self.build_sector_tab()
+        except Exception as e:
+            print(f"  [ERROR] {self.SECTOR_TAB} build failed: {e}")
 
 
 # ======================================================

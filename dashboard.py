@@ -245,6 +245,7 @@ NAV = {
     ],
     "FUNDS": [
         ("ETFs US",                    "ETFs US"),
+        ("ETFs US by Sector",          "ETFs US by Sector"),
         ("Leveraged Funds",            "Leveraged Funds"),
         ("ETFs India",                 "ETFs India"),
         ("Commodity ETFs",             "Commodity ETFs"),
@@ -542,6 +543,25 @@ elif section == "ETFs US":
     else:
         df = df.drop(df.columns[2], axis=1)
         ui.render_table(df, height=620, searchable=True)
+
+elif section == "ETFs US by Sector":
+    df = safe_load(data.load_etfs_us_by_sector)
+    price_as_of, _ = data.load_stocks_metadata("ETFs US by Sector")
+    ui.section_header("ETFs US by Sector", "US ETFs grouped by sector / style",
+                      price_as_of=price_as_of)
+    if df is None:
+        ui.load_error()
+    elif df.empty:
+        st.info("No data available.")
+    else:
+        sectors = sorted(df["Sector"].dropna().unique()) if "Sector" in df.columns else []
+        choice = st.selectbox("Sector", ["All sectors"] + sectors)
+        if choice != "All sectors" and "Sector" in df.columns:
+            view = df[df["Sector"] == choice].drop(columns=["Sector"])
+        else:
+            view = df
+        st.caption(f"{len(view)} ETF{'s' if len(view) != 1 else ''}")
+        ui.render_table(view, height=620, bold_first_col=False, searchable=True)
 
 elif section == "Leveraged Funds":
     df = safe_load(data.load_leveraged_funds)

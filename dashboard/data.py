@@ -275,6 +275,13 @@ def load_etfs_us():
 
 
 @st.cache_data(ttl=28800)
+def load_etfs_us_by_sector():
+    ws = _ws("ETFs US by Sector")
+    # Header row 3, data from row 4. Cols: Sector, Ticker, Name, AUM, Price, 1D..3Y.
+    return _range_to_df(ws, "A3:L400", header_idx=0)
+
+
+@st.cache_data(ttl=28800)
 def load_leveraged_funds():
     ws = _ws("Biggest Leveraged Funds ")   # trailing space is intentional
     return _range_to_df(ws, "A6:M122", header_idx=0)
