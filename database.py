@@ -1451,6 +1451,13 @@ _GICS_SECTORS = {
     "Consumer Discretionary", "Consumer Staples",
 }
 
+# Display names on the leader boards, matched to the S&P 500 Sectors page
+# (which uses "Health Care" and "Information Technology").
+_SP500_SECTOR_NAMES = {
+    "Healthcare": "Health Care",
+    "Technology": "Information Technology",
+}
+
 
 def _to_float(v):
     """Parse a return/price cell to float; None if not numeric."""
@@ -1826,6 +1833,7 @@ class ManualETFEngine:
                                          _num_or_str(r[4])]
                                         + [_num_or_str(x) for x in r[5:12]],
             width="L",
+            five_d_out_idx=6,   # out row: Sector,Ticker,Name,AUM,Price,1D,5D
         )
 
     def build_leveraged_sector_leaders_tab(self):
@@ -1842,10 +1850,12 @@ class ManualETFEngine:
                                          _num_or_str(r[5])]
                                         + [_num_or_str(x) for x in r[6:13]],
             width="M",
+            five_d_out_idx=7,   # out row: Sector,Leverage,Ticker,Name,AUM,Price,1D,5D
         )
 
     def _build_leaders(self, src_tab, out_tab, src_range, sector_idx,
-                       returns_idx, out_header, row_builder, width):
+                       returns_idx, out_header, row_builder, width,
+                       five_d_out_idx):
         print(f"Building {out_tab}...")
         try:
             ws_out = self.sheet_client.get_worksheet(out_tab)
@@ -1862,6 +1872,17 @@ class ManualETFEngine:
         leaders = sector_leaders(rows, sector_idx, returns_idx,
                                  top_n=self.LEADERS_TOP_N)
         data = [row_builder(rank, r) for rank, r in leaders]
+
+        # Rename sectors to match the S&P 500 Sectors page ("Health Care",
+        # "Information Technology"), then order rows by 5D performance desc
+        # (best-performing sector's leader first), like that page.
+        for row in data:
+            row[0] = _SP500_SECTOR_NAMES.get(row[0], row[0])
+
+        def _5d(row):
+            v = _to_float(row[five_d_out_idx])
+            return v if v is not None else float("-inf")
+        data.sort(key=_5d, reverse=True)
 
         end_row = 3 + len(data)
         ws_out.batch_clear([f"A3:{width}400"])
