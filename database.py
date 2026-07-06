@@ -1409,21 +1409,34 @@ def classify_etf_sectors(tickers: list) -> dict:
     return {t.upper(): cache.get(t.upper(), "Other") for t in tickers}
 
 
-# Ordered keyword rules for classifying a LEVERAGED fund into a theme by its
-# NAME (yfinance can't sector-classify these). Order matters: first bucket
-# whose keywords match wins. Pure string logic — no network.
+# Ordered keyword rules for classifying a LEVERAGED fund by its NAME (yfinance
+# can't sector-classify these). Order matters: first bucket whose keywords
+# match wins. Sector-tracking funds resolve to their GICS sector; the rest go
+# to Commodity / Factor-Dividend / Index / Single Stock / Other. Pure string
+# logic — no network.
 _LEVERAGED_THEME_RULES = [
     ("Commodity", ["gold", "miner", "oil", "silver", " gas", "natural gas",
                    "mlp", "platinum", "uranium", "commodit"]),
     ("Factor/Dividend", ["factor", "dividend", "volatility", "quality",
                          "momentum", "high dividend"]),
-    ("Sector/Thematic", ["financ", "bank", "biotech", "semiconductor", "pharma",
-                         "medical", "aerospace", "defense", "defence", "consumer",
-                         "transportation", "travel", "robotic",
-                         "artificial intelligence", "fang", "cloud", "internet",
-                         "cyber", "auto", "bdc", "real estate", "utilit",
-                         "energy", "health", "industr", "communication",
-                         "retail", "homebuild", "innovation", "mstr", "coin"]),
+    # ── GICS sectors (a leveraged fund tracking a sector) ──
+    ("Financials", ["financ", "bank", "bdc", "insurance", "broker"]),
+    ("Healthcare", ["biotech", "pharma", "medical", "health", "genomic"]),
+    ("Technology", ["semiconductor", "cyber", "cloud", "robotic",
+                    "artificial intelligence", "fang", "innovation",
+                    " ai ", "software", "tech"]),
+    ("Energy", ["energy"]),
+    ("Utilities", ["utilit"]),
+    ("Real Estate", ["real estate", "reit", "homebuild"]),
+    ("Communication Services", ["communication", "internet", "media",
+                                "telecom", "entertainment"]),
+    ("Consumer Staples", ["consumer staples", "staples"]),
+    ("Consumer Discretionary", ["consumer discretionary", "consumer cyclical",
+                                "retail", "travel", "auto", "leisure",
+                                "consumer"]),
+    ("Industrials", ["aerospace", "defense", "defence", "transportation",
+                     "airline", "industr", "manufactur"]),
+    ("Materials", ["materials", "chemical", "steel"]),
     ("Index", ["s&p", "nasdaq", "qqq", "dow", "russell", "ftse", "msci", "eafe",
                "csi", "stoxx", "nifty", "emerging", "small cap", "smallcap",
                "mid cap", "midcap", "large cap", "total market"]),
@@ -1431,7 +1444,7 @@ _LEVERAGED_THEME_RULES = [
 
 
 def _classify_leveraged_theme(name: str) -> str:
-    """Classify a leveraged fund into a theme bucket from its name."""
+    """Classify a leveraged fund into a theme/sector bucket from its name."""
     n = (name or "").lower()
     if not n:
         return "Other"
