@@ -576,6 +576,14 @@ try {{
     components.html(html, height=720, scrolling=True)
 
 
+def today_ist_label() -> str:
+    """'<Mon> <day>, <year>' for today in IST — used by live pages whose data
+    is current as of now (not the sheet's last-write date)."""
+    from zoneinfo import ZoneInfo
+    now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    return f"{now.strftime('%b')} {now.day}, {now.year}"
+
+
 def section_header(title: str, subtitle: str = "", price_as_of: str = "", updated_at: str = ""):
     if price_as_of:
         top_right = price_as_of

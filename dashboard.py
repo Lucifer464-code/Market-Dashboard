@@ -393,7 +393,8 @@ ui.mobile_nav(_KEY_TO_LABEL.get(st.session_state.section, st.session_state.secti
 section = st.session_state.section
 
 if section == "Live Market":
-    ui.section_header("Live Market", "Live NSE prices · updates while the market is open")
+    ui.section_header("Live Market", "Live NSE prices · updates while the market is open",
+                      price_as_of=f"Price as on {ui.today_ist_label()}")
     _fb_cfg = firebase_web_config()
     if not _fb_cfg.get("apiKey"):
         st.info("Live Market is not configured. Add FIREBASE_WEB_CONFIG "
