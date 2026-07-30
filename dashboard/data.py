@@ -287,8 +287,9 @@ def load_etfs_us():
 @st.cache_data(ttl=28800)
 def load_etfs_us_by_sector():
     ws = _ws("ETFs US by Sector")
-    # Header row 3, data from row 4. Cols: Sector, Ticker, Name, AUM, Price, 1D..3Y.
-    return _range_to_df(ws, "A3:L400", header_idx=0)
+    # Header row 3, data from row 4.
+    # Cols: Sector, Sub-Industry, Ticker, Name, AUM, Price, 1D..3Y.
+    return _range_to_df(ws, "A3:M400", header_idx=0)
 
 
 @st.cache_data(ttl=28800)

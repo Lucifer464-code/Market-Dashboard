@@ -571,12 +571,34 @@ elif section == "ETFs US Sector Leaders":
         # carries style/geography buckets (US Broad Market, Value, Growth,
         # Other, ...) that the leaders sheet deliberately excludes.
         sectors = sorted(df["Sector"].dropna().unique()) if "Sector" in df.columns else []
-        choice = st.selectbox("Sector", ["All sectors"] + sectors)
+        has_sub = all_etfs is not None and "Sub-Industry" in all_etfs.columns
+
+        c1, c2 = st.columns(2)
+        with c1:
+            choice = st.selectbox("Sector", ["All sectors"] + sectors)
+
+        # Sub-industry narrows within a sector (Biotech / Pharma / Medical
+        # Devices, Semiconductors / Software / Cybersecurity, ...). Only
+        # meaningful once a single sector is picked, so it stays disabled
+        # on "All sectors".
+        sub_choice = "All sub-industries"
+        if has_sub and choice != "All sectors":
+            subs = sorted(
+                all_etfs[all_etfs["Sector"] == choice]["Sub-Industry"]
+                .dropna().unique()
+            )
+            if len(subs) > 1:
+                with c2:
+                    sub_choice = st.selectbox("Sub-industry",
+                                              ["All sub-industries"] + subs)
 
         if choice == "All sectors":
             view = df
         elif all_etfs is not None:
-            view = ui.sort_by_keyword(all_etfs[all_etfs["Sector"] == choice], "5d")
+            view = all_etfs[all_etfs["Sector"] == choice]
+            if sub_choice != "All sub-industries":
+                view = view[view["Sub-Industry"] == sub_choice]
+            view = ui.sort_by_keyword(view, "5d")
         else:
             view = df[df["Sector"] == choice]
 

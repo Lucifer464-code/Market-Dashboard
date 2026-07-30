@@ -17,6 +17,18 @@ from dateutil.relativedelta import relativedelta
 from google.oauth2.service_account import Credentials
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# Curated sector-ETF universe (src/sector_etf_universe.py). Optional: if the
+# module is missing the pipeline still runs, falling back to the etfdb-only
+# list and yfinance category classification.
+try:
+    import sys as _sys
+    _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
+    import sector_etf_universe as _sector_universe
+except Exception as _e:                                    # pragma: no cover
+    print(f"[WARN] sector_etf_universe unavailable ({_e}); "
+          f"sector depth will be limited to the etfdb list.")
+    _sector_universe = None
+
 
 def _is_market_open(market: str) -> bool:
     """Return True if the given market is currently in its regular session."""
@@ -1600,8 +1612,10 @@ class ManualETFEngine:
             "market":      "US",
         },
         "ETFs US": {
+            # Row span covers the etfdb top-AUM list (~200) plus the curated
+            # sector universe appended by ensure_sector_etfs_listed (~155).
             "start_row":   3,
-            "end_row":     202,
+            "end_row":     400,
             "ticker_col":  "B",
             "returns_col": "F",
             "no_sort":     False,
@@ -1696,6 +1710,82 @@ class ManualETFEngine:
 
     SECTOR_TAB = "ETFs US by Sector"
 
+    def ensure_sector_etfs_listed(self):
+        """Append any curated sector ETF missing from the 'ETFs US' sheet.
+
+        The sheet is populated from etfdb's top-equity-by-AUM page, which is
+        dominated by broad-market funds — most true sector ETFs never appear.
+        This tops the list up with the curated universe so the per-sector
+        views have real depth (Real Estate went from zero ETFs to fifteen).
+
+        Only Ticker/Name/AUM are written here; update_sheet computes Price and
+        the 1D..3Y returns from yfinance history for every row afterwards, so
+        the appended tickers get the same treatment as the scraped ones.
+        Existing rows are never touched.
+        """
+        if not _sector_universe:
+            print("  [SKIP] curated sector universe unavailable.")
+            return
+
+        print("Topping up ETFs US with curated sector ETFs...")
+        ws = self.sheet_client.get_worksheet("ETFs US")
+        cfg = self.SHEET_CONFIGS["ETFs US"]
+        start_row = cfg["start_row"]
+
+        # Existing tickers (col B) and the first free row beneath them.
+        existing_rows = ws.get(f"B{start_row}:B{cfg['end_row']}")
+        have = {r[0].strip().upper() for r in existing_rows if r and r[0].strip()}
+        next_row = start_row + len(
+            [r for r in existing_rows if r and r[0].strip()]
+        )
+
+        missing = [t for t in _sector_universe.all_tickers() if t not in have]
+        if not missing:
+            print("  ETFs US already contains every curated sector ETF.\n")
+            return
+
+        def _meta(ticker):
+            """(ticker, name, aum_formatted) from yfinance; None if unusable."""
+            try:
+                info = yf.Ticker(ticker).info
+                name = info.get("shortName") or info.get("longName")
+                aum = info.get("totalAssets")
+                if not name:
+                    return None
+                if aum:
+                    aum_txt = (f"${aum / 1e9:.2f}B" if aum >= 1e9
+                               else f"${aum / 1e6:.0f}M")
+                else:
+                    aum_txt = ""
+                return (ticker, name, aum_txt)
+            except Exception:
+                return None
+
+        with ThreadPoolExecutor(max_workers=12) as pool:
+            fetched = [m for m in pool.map(_meta, missing) if m]
+
+        if not fetched:
+            print("  [SKIP] no metadata resolved for the missing tickers.\n")
+            return
+
+        if next_row + len(fetched) - 1 > cfg["end_row"]:
+            print(f"  [WARN] appending {len(fetched)} rows would pass "
+                  f"end_row={cfg['end_row']}; raise it in SHEET_CONFIGS.")
+            fetched = fetched[: max(0, cfg["end_row"] - next_row + 1)]
+
+        # Ticker=B, Name=C, AUM(formatted)=E — matches the etfdb layout that
+        # build_sector_tab reads (B3:M202 -> ticker, name, _, aum, price...).
+        updates = []
+        for i, (ticker, name, aum_txt) in enumerate(fetched):
+            row = next_row + i
+            updates.append({"range": f"B{row}:C{row}", "values": [[ticker, name]]})
+            if aum_txt:
+                updates.append({"range": f"E{row}", "values": [[aum_txt]]})
+
+        self.sheet_client.batch_update(ws, updates)
+        print(f"  Appended {len(fetched)} sector ETF(s) to ETFs US "
+              f"(rows {next_row}-{next_row + len(fetched) - 1}).\n")
+
     def build_sector_tab(self):
         """Read the (just-refreshed) ETFs US rows, classify each ETF into a
         sector/style bucket, and write the 'ETFs US by Sector' tab:
@@ -1733,30 +1823,39 @@ class ManualETFEngine:
 
         sectors = classify_etf_sectors([t for t, *_ in raw])
 
+        # The etfdb-sourced list is ranked by AUM, so it is overwhelmingly
+        # broad-market/style funds and carries almost no depth per sector.
+        # Pin the curated sector universe on top of it: its sector is taken
+        # from the curated map (yfinance's `category` disagrees with GICS for
+        # PAVE/GRID/URA/COPX and would scatter them into the wrong bucket).
+        curated = _sector_universe.ticker_to_sector() if _sector_universe else {}
+
         for ticker, name, aum, price, rets in raw:
-            sector = sectors.get(ticker.upper(), "Other")
+            sector = curated.get(ticker.upper()) or sectors.get(ticker.upper(), "Other")
+            sub = (_sector_universe.sub_industry(sector, name)
+                   if _sector_universe else sector)
             # 5D (rets[1]) numeric for sort
             try:
                 five_d = float(str(rets[1]).replace("%", "").replace("+", ""))
             except (ValueError, TypeError):
                 five_d = float("-inf")
             out_rows.append((sector, five_d,
-                             [sector, ticker, name, aum, _num_or_str(price)]
+                             [sector, sub, ticker, name, aum, _num_or_str(price)]
                              + [_num_or_str(x) for x in rets]))
 
         # Sort: Sector asc, then 5D desc
         out_rows.sort(key=lambda x: (x[0], -x[1]))
         data = [r[2] for r in out_rows]
 
-        header = ["Sector", "Ticker", "Name", "AUM", "Price",
+        header = ["Sector", "Sub-Industry", "Ticker", "Name", "AUM", "Price",
                   "1D", "5D", "1M", "3M", "6M", "1Y", "3Y"]
 
         # Clear a generous data area, then write header (row 3) + data (row 4+)
-        ws_out.batch_clear(["A3:L400"])
+        ws_out.batch_clear(["A3:M400"])
         end_row = 3 + len(data)
-        updates = [{"range": "A3:L3", "values": [header]}]
+        updates = [{"range": "A3:M3", "values": [header]}]
         if data:
-            updates.append({"range": f"A4:L{end_row}", "values": data})
+            updates.append({"range": f"A4:M{end_row}", "values": data})
         self.sheet_client.batch_update(ws_out, updates)
 
         price_as_of, updated_at = _make_metadata("US")
@@ -1842,14 +1941,16 @@ class ManualETFEngine:
         [Sector, Ticker, Name, AUM, Price, 1D..3Y]."""
         self._build_leaders(
             src_tab=self.SECTOR_TAB, out_tab=self.ETF_LEADERS_TAB,
-            src_range="A4:L400",
-            # src cols: Sector0 Ticker1 Name2 AUM3 Price4 1D5..3Y11
-            sector_idx=0, returns_idx=list(range(5, 12)),
+            src_range="A4:M400",
+            # src cols: Sector0 Sub1 Ticker2 Name3 AUM4 Price5 1D6..3Y12
+            # The leader boards stay on the 11 GICS sectors, so the
+            # Sub-Industry column is read past but not carried through.
+            sector_idx=0, returns_idx=list(range(6, 13)),
             out_header=["Sector", "Ticker", "Name", "AUM", "Price",
                         "1D", "5D", "1M", "3M", "6M", "1Y", "3Y"],
-            row_builder=lambda rank, r: [r[0], r[1], r[2], r[3],
-                                         _num_or_str(r[4])]
-                                        + [_num_or_str(x) for x in r[5:12]],
+            row_builder=lambda rank, r: [r[0], r[2], r[3], r[4],
+                                         _num_or_str(r[5])]
+                                        + [_num_or_str(x) for x in r[6:13]],
             width="L",
             five_d_out_idx=6,   # out row: Sector,Ticker,Name,AUM,Price,1D,5D
         )
@@ -1918,6 +2019,13 @@ class ManualETFEngine:
               f"{len({r[0] for r in data})} sectors\n")
 
     def update_all(self):
+        # Top up the ETFs US list with the curated sector universe FIRST, so
+        # the appended tickers get Price/returns in the same pass below.
+        try:
+            self.ensure_sector_etfs_listed()
+        except Exception as e:
+            print(f"  [ERROR] sector ETF top-up failed: {e}")
+
         for sheet_name, cfg in self.SHEET_CONFIGS.items():
             try:
                 self._update_sheet(sheet_name, cfg)
