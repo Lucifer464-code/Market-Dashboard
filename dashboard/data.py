@@ -14,6 +14,16 @@ from google.oauth2.service_account import Credentials
 SHEET_ID = "1uJoD2JRvzRpn2KHJa80aZADQ2DfRwm2qbZKMuv0PKBM"
 SCOPES   = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 
+# The "ETFs US by Sector" / "Leveraged Funds by Theme" tabs carry raw bucket
+# names, while the *Sector Leaders* tabs are written with S&P 500 sector names
+# (database.py applies this same map before writing). Apply it on read so
+# sector values from the two tabs compare equal. Keep in sync with
+# database.py::_SP500_SECTOR_NAMES.
+SP500_SECTOR_NAMES = {
+    "Healthcare": "Health Care",
+    "Technology": "Information Technology",
+}
+
 
 # ── Connection ────────────────────────────────────────────
 

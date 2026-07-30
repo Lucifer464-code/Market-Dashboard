@@ -557,9 +557,29 @@ elif section == "ETFs US Sector Leaders":
     elif df.empty:
         st.info("No data available.")
     else:
+        # "All sectors" shows the top ETF per sector (the leaders sheet).
+        # Picking a single sector shows every ETF in it, from the full
+        # 'ETFs US by Sector' sheet — same columns, so the table is identical.
+        all_etfs = safe_load(data.load_etfs_us_by_sector)
+        if all_etfs is not None and not all_etfs.empty and "Sector" in all_etfs.columns:
+            all_etfs = all_etfs.copy()
+            all_etfs["Sector"] = all_etfs["Sector"].replace(data.SP500_SECTOR_NAMES)
+        else:
+            all_etfs = None
+
+        # Offer only the GICS sectors this page covers. The full tab also
+        # carries style/geography buckets (US Broad Market, Value, Growth,
+        # Other, ...) that the leaders sheet deliberately excludes.
         sectors = sorted(df["Sector"].dropna().unique()) if "Sector" in df.columns else []
         choice = st.selectbox("Sector", ["All sectors"] + sectors)
-        view = df[df["Sector"] == choice] if choice != "All sectors" else df
+
+        if choice == "All sectors":
+            view = df
+        elif all_etfs is not None:
+            view = ui.sort_by_keyword(all_etfs[all_etfs["Sector"] == choice], "5d")
+        else:
+            view = df[df["Sector"] == choice]
+
         st.caption(f"{len(view)} ETF{'s' if len(view) != 1 else ''}")
         ui.render_table(view, height=620, bold_first_col=False, searchable=True)
 
