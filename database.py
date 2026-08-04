@@ -1733,11 +1733,21 @@ class ManualETFEngine:
         start_row = cfg["start_row"]
 
         # Existing tickers (col B) and the first free row beneath them.
+        #
+        # gspread trims trailing blank cells, so ws.get() can return short or
+        # empty entries. Index by absolute sheet row rather than by position
+        # in the returned list, and derive next_row from the LAST occupied row
+        # instead of a count of non-blank ones — the list is not necessarily
+        # contiguous, and counting lands inside the existing data when it
+        # isn't, overwriting live rows and duplicating every ticket it hits.
         existing_rows = ws.get(f"B{start_row}:B{cfg['end_row']}")
-        have = {r[0].strip().upper() for r in existing_rows if r and r[0].strip()}
-        next_row = start_row + len(
-            [r for r in existing_rows if r and r[0].strip()]
-        )
+        have, last_used = set(), start_row - 1
+        for offset, r in enumerate(existing_rows):
+            ticker = (r[0].strip().upper() if r and len(r) > 0 and r[0] else "")
+            if ticker:
+                have.add(ticker)
+                last_used = start_row + offset
+        next_row = last_used + 1
 
         missing = [t for t in _sector_universe.all_tickers() if t not in have]
         if not missing:
@@ -1772,6 +1782,15 @@ class ManualETFEngine:
             print(f"  [WARN] appending {len(fetched)} rows would pass "
                   f"end_row={cfg['end_row']}; raise it in SHEET_CONFIGS.")
             fetched = fetched[: max(0, cfg["end_row"] - next_row + 1)]
+
+        # Safety net: never write over a row that already holds a ticker. If
+        # next_row is wrong for any reason, abort rather than corrupt the list
+        # (a bad next_row duplicates every ETF it lands on).
+        occupied = ws.get(f"B{next_row}:B{next_row + len(fetched) - 1}")
+        if any(r and len(r) > 0 and str(r[0]).strip() for r in occupied):
+            print(f"  [ABORT] rows {next_row}+ are not empty; refusing to "
+                  f"overwrite existing ETFs. Nothing was written.")
+            return
 
         # Ticker=B, Name=C, AUM(formatted)=E — matches the etfdb layout that
         # build_sector_tab reads (B3:M202 -> ticker, name, _, aum, price...).
