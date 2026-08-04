@@ -472,10 +472,17 @@ class StocksDataEngine:
 
                 for symbol in batch:
                     try:
-                        close = (
-                            data["Close"] if len(batch) == 1
-                            else data[symbol]["Close"]
-                        )
+                        sym_df = data if len(batch) == 1 else data[symbol]
+                        close = sym_df["Close"]
+
+                        # yfinance sometimes returns the most recent trading
+                        # day with Close=NaN while High/Low/Open are already
+                        # populated (the close has not settled in the feed).
+                        # Only "Adj Close" is an acceptable stand-in — Open or
+                        # High would invent a close that never happened.
+                        if close.isna().any() and "Adj Close" in sym_df.columns:
+                            close = close.fillna(sym_df["Adj Close"])
+
                         close = close.dropna().sort_index()
 
                         if len(close) < 6:
@@ -605,10 +612,17 @@ class StocksDataEngine:
 
                 for symbol in batch:
                     try:
-                        close = (
-                            data["Close"] if len(batch) == 1
-                            else data[symbol]["Close"]
-                        )
+                        sym_df = data if len(batch) == 1 else data[symbol]
+                        close = sym_df["Close"]
+
+                        # yfinance sometimes returns the most recent trading
+                        # day with Close=NaN while High/Low/Open are already
+                        # populated (the close has not settled in the feed).
+                        # Only "Adj Close" is an acceptable stand-in — Open or
+                        # High would invent a close that never happened.
+                        if close.isna().any() and "Adj Close" in sym_df.columns:
+                            close = close.fillna(sym_df["Adj Close"])
+
                         close = close.dropna().sort_index()
 
                         if len(close) < 6:
@@ -910,6 +924,13 @@ class StocksDataEngine:
         empty   = ["", "", "", ""]
 
         # ── Metadata (rows 1-2, read by dashboard) ────────────
+        # See _write_ath_sheet: A1 is what tells the reader which trading day
+        # these figures belong to, so a malformed label must not reach it.
+        if not price_as_of or not str(price_as_of).lower().startswith("price as on"):
+            print(f"  [WARN] {sheet_name}: refusing to write malformed "
+                  f"price_as_of {price_as_of!r}; using a fallback label.")
+            price_as_of = "Price as on — (date unavailable)"
+
         updates.append({"range": "A1", "values": [[price_as_of]]})
         updates.append({"range": "A2", "values": [[updated_at]]})
 
@@ -979,6 +1000,15 @@ class StocksDataEngine:
         ]]
 
         # ── Metadata (rows 1-2, read by dashboard) ────────────
+        # A1 is the only place the sheet discloses WHICH trading day the
+        # prices and returns belong to. If it is empty or truncated the page
+        # shows figures with no date to contradict them — a stale 1D% then
+        # reads as current. Refuse to write a label that is obviously not one.
+        if not price_as_of or not str(price_as_of).lower().startswith("price as on"):
+            print(f"  [WARN] {sheet_name}: refusing to write malformed "
+                  f"price_as_of {price_as_of!r}; using a fallback label.")
+            price_as_of = "Price as on — (date unavailable)"
+
         updates.append({"range": "A1", "values": [[price_as_of]]})
         updates.append({"range": "A2", "values": [[updated_at]]})
 
