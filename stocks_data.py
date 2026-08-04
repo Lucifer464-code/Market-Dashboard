@@ -426,6 +426,10 @@ class StocksDataEngine:
         """
         all_rows    = []
         last_date   = None
+        # Set when a live price is used before yfinance has published today's
+        # daily candle — the label must then say (Live), not (Close), or the
+        # sheet would date intraday figures to the previous session.
+        used_live_ahead_of_candle = False
         market_open = self._is_market_open(market)
         batches     = [
             tickers[i:i + self.PRICE_BATCH_SIZE]
@@ -508,14 +512,35 @@ class StocksDataEngine:
                         if last_date is None or confirmed_date > last_date:
                             last_date = confirmed_date
 
-                        # Check if yfinance has a candle for today — this is the
-                        # only reliable signal that the market is actually open
-                        # (handles holidays, half-days, etc. unlike _is_market_open)
+                        # Prefer the live price whenever one is available.
+                        #
+                        # The old gate required yfinance to already carry a
+                        # daily candle for today. That candle can lag the live
+                        # feed by a full session, and when it does the whole
+                        # row falls back to the last CONFIRMED close — so 1D%
+                        # describes the two days before yesterday and is shown
+                        # as if current (AMZN read +15.32%, its Jul 31 earnings
+                        # gap, on Aug 4). fast_info.last_price is fresh even
+                        # when the daily bar has not been published yet, so key
+                        # off the live price itself rather than the candle.
+                        #
+                        # The reference close must move with the price: pair a
+                        # live price with the last confirmed close, and a
+                        # confirmed price with the close before it. Mixing the
+                        # two is what produced the stale figure.
                         has_today = bool((idx_naive.normalize() == today).any())
+                        live_price = live_prices.get(symbol)
 
-                        if has_today and symbol in live_prices:
-                            price     = live_prices[symbol]
-                            change_1d = (price / last_td_close - 1) * 100 if last_td_close else np.nan
+                        if live_price:
+                            price = float(live_price)
+                            # If today's candle already exists, last_td_close is
+                            # yesterday. If it does not, last_td_close is still
+                            # the most recent close — the correct 1D reference
+                            # either way.
+                            ref = last_td_close
+                            change_1d = (price / ref - 1) * 100 if ref else np.nan
+                            if not has_today:
+                                used_live_ahead_of_candle = True
                         else:
                             price     = last_td_close
                             change_1d = (last_td_close / prev_td_close - 1) * 100 if prev_td_close else np.nan
@@ -566,9 +591,21 @@ class StocksDataEngine:
             except Exception as e:
                 print(f"\n  [WARN] Batch {batch_idx} error: {e}")
 
-        # Finalise EOD label using the last confirmed date across all stocks
+        # Finalise EOD label using the last confirmed date across all stocks.
+        # If live prices were used before today's candle existed, the figures
+        # are intraday — dating them to the last confirmed close would repeat
+        # the exact mistake this pipeline is meant to avoid.
         if price_as_of is None:
-            if last_date is not None:
+            if used_live_ahead_of_candle:
+                _tz_name  = "America/New_York" if market == "US" else "Asia/Kolkata"
+                _tz_label = "ET" if market == "US" else "IST"
+                _n = datetime.now(ZoneInfo(_tz_name))
+                price_as_of = (
+                    f"Price as on {_n.strftime('%b')} {_n.day}, {_n.year}"
+                    f"  ·  {int(_n.strftime('%I'))}:{_n.strftime('%M %p')} {_tz_label}"
+                    f"  (Live)"
+                )
+            elif last_date is not None:
                 ld = pd.Timestamp(last_date)
                 price_as_of = f"Price as on {ld.strftime('%b')} {ld.day}, {ld.year}  (Close)"
             else:
@@ -589,6 +626,11 @@ class StocksDataEngine:
         """
         all_rows    = []
         market_open = self._is_market_open(market)
+        # Track what the rows actually contain so the label can describe them
+        # accurately: whether any live price was used, and the newest confirmed
+        # close date seen across the universe.
+        used_live_price = False
+        last_close_date = None
         batches     = [
             tickers[i:i + self.PRICE_BATCH_SIZE]
             for i in range(0, len(tickers), self.PRICE_BATCH_SIZE)
@@ -639,9 +681,22 @@ class StocksDataEngine:
                         if s_confirmed.empty:
                             continue
                         prev_close = float(s_confirmed.iloc[-1])
+                        _cd = s_confirmed.index[-1]
+                        if last_close_date is None or _cd > last_close_date:
+                            last_close_date = _cd
 
-                        # Use fast_info live price when market is open
-                        price = live_prices.get(symbol, prev_close) if market_open else prev_close
+                        # Prefer the live price whenever one is available, not
+                        # only during the session. _is_market_open is a clock
+                        # check, so just after the close (and before yfinance
+                        # publishes the daily candle) it falls back to the last
+                        # CONFIRMED close — which can already be a session old,
+                        # dating the whole sheet to the wrong day.
+                        _lp = live_prices.get(symbol)
+                        if _lp:
+                            price = float(_lp)
+                            used_live_price = True
+                        else:
+                            price = prev_close
 
                         change_1w = (
                             (price / float(s_confirmed.iloc[-6]) - 1) * 100
@@ -667,20 +722,27 @@ class StocksDataEngine:
             except Exception as e:
                 print(f"\n  [WARN] Batch {batch_idx} error: {e}")
 
-        # Build price label
-        if market_open:
-            _tz_name  = "America/New_York" if market == "US" else "Asia/Kolkata"
-            _tz_label = "ET" if market == "US" else "IST"
-            _now      = datetime.now(ZoneInfo(_tz_name))
+        # Build price label. Live prices are now used whenever available, so
+        # the label keys off what the rows actually contain rather than the
+        # clock. The old else-branch stamped TODAY's date with "(Close)" even
+        # when the figures came from an earlier session — Top G&L US read
+        # "Price as on Aug 4 (Close)" while ATH US, on the same data, said
+        # Jul 31. Report the real date instead.
+        _tz_name  = "America/New_York" if market == "US" else "Asia/Kolkata"
+        _tz_label = "ET" if market == "US" else "IST"
+        _now      = datetime.now(ZoneInfo(_tz_name))
+
+        if used_live_price:
             price_as_of = (
                 f"Price as on {_now.strftime('%b')} {_now.day}, {_now.year}"
                 f"  ·  {int(_now.strftime('%I'))}:{_now.strftime('%M %p')} {_tz_label}"
                 f"  (Live)"
             )
+        elif last_close_date is not None:
+            ld = pd.Timestamp(last_close_date)
+            price_as_of = f"Price as on {ld.strftime('%b')} {ld.day}, {ld.year}  (Close)"
         else:
-            _tz_name = "America/New_York" if market == "US" else "Asia/Kolkata"
-            _now     = datetime.now(ZoneInfo(_tz_name))
-            price_as_of = f"Price as on {_now.strftime('%b')} {_now.day}, {_now.year}  (Close)"
+            price_as_of = "Price as on —  (Close)"
 
         return pd.DataFrame(all_rows), price_as_of
 
