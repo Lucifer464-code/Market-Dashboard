@@ -359,9 +359,14 @@ class StocksDataEngine:
         Both values come from the same single fast_info call per ticker, so there is
         no extra cost vs. fetching market cap alone.
 
-        Returns (mcap_map, live_prices):
+        Returns (mcap_map, live_prices, prev_closes):
             mcap_map    : {ticker: market_cap_float} — only tickers with valid caps
             live_prices : {ticker: last_price_float} — used instead of intraday download
+            prev_closes : {ticker: previous_close_float} — the most recent SETTLED
+                          close. yfinance's daily history can lag a full session
+                          (the latest row arrives with Close=NaN), but fast_info
+                          carries that close already, so this is the only reliable
+                          way to get last-close figures on the day they settle.
         """
         print(f"  Fetching market caps for {len(tickers)} tickers (parallel)...")
 
@@ -371,27 +376,32 @@ class StocksDataEngine:
                     fi         = yf.Ticker(symbol).fast_info
                     mcap       = fi.market_cap
                     last_price = getattr(fi, "last_price", None)
+                    prev_close = getattr(fi, "previous_close", None)
                     return (
                         symbol,
                         float(mcap)       if mcap       else None,
                         float(last_price) if last_price else None,
+                        float(prev_close) if prev_close else None,
                     )
                 except Exception:
                     if attempt < 2:
                         time.sleep(1 + attempt)
-            return symbol, None, None
+            return symbol, None, None, None
 
         mcap_map    = {}
         live_prices = {}
+        prev_closes = {}
         with ThreadPoolExecutor(max_workers=self.MCAP_WORKERS) as pool:
-            for symbol, mcap, last_price in pool.map(_get, tickers):
+            for symbol, mcap, last_price, prev_close in pool.map(_get, tickers):
                 if mcap:
                     mcap_map[symbol] = mcap
                 if last_price:
                     live_prices[symbol] = last_price
+                if prev_close:
+                    prev_closes[symbol] = prev_close
 
         print(f"  Market caps: {len(mcap_map)}/{len(tickers)} tickers resolved")
-        return mcap_map, live_prices
+        return mcap_map, live_prices, prev_closes
 
     # ── Market hours check ────────────────────────────────────
 
@@ -412,7 +422,8 @@ class StocksDataEngine:
 
     # ── Price history fetch ───────────────────────────────────
 
-    def _fetch_price_history_ath(self, tickers: list, mcap_map: dict, live_prices: dict, market: str = "US") -> tuple:
+    def _fetch_price_history_ath(self, tickers: list, mcap_map: dict, live_prices: dict,
+                                 prev_closes: dict | None = None, market: str = "US") -> tuple:
         """
         Download 4Y of daily history for the ATH pipeline.
 
@@ -425,11 +436,10 @@ class StocksDataEngine:
             Change1D | Change1W | Change1M | Change3M | Change6M | Change1Y | Change3Y
         """
         all_rows    = []
+        # Newest SETTLED close date seen across the universe. Drives the sheet
+        # label, so it must track the close actually used per stock — not the
+        # newest bar yfinance happens to carry.
         last_date   = None
-        # Set when a live price is used before yfinance has published today's
-        # daily candle — the label must then say (Live), not (Close), or the
-        # sheet would date intraday figures to the previous session.
-        used_live_ahead_of_candle = False
         market_open = self._is_market_open(market)
         batches     = [
             tickers[i:i + self.PRICE_BATCH_SIZE]
@@ -438,8 +448,12 @@ class StocksDataEngine:
         total_b = len(batches)
         print(f"  Fetching price history — {len(tickers)} tickers, {total_b} batches...")
 
-        # Build the "price as of" label for the sheet header
-        if market_open:
+        # Build the "price as of" label for the sheet header.
+        # US is settled-close only: intraday prices make 1D% drift through the
+        # session and never tie out against a source quoting closes, so the
+        # label is always resolved from the actual close date after the batch
+        # loop. India keeps the live label while its market is open.
+        if market_open and market != "US":
             _tz_name  = "America/New_York" if market == "US" else "Asia/Kolkata"
             _tz_label = "ET" if market == "US" else "IST"
             _tz       = ZoneInfo(_tz_name)
@@ -487,6 +501,17 @@ class StocksDataEngine:
                         if close.isna().any() and "Adj Close" in sym_df.columns:
                             close = close.fillna(sym_df["Adj Close"])
 
+                        # Every date the provider returned a BAR for, including
+                        # one whose Close has not settled yet. Needed to tell a
+                        # not-yet-settled session apart from one that never
+                        # traded, and to date the settled close correctly.
+                        _all_idx  = sym_df.index
+                        raw_dates = list(
+                            _all_idx.tz_localize(None)
+                            if getattr(_all_idx, "tz", None) is not None
+                            else _all_idx
+                        )
+
                         close = close.dropna().sort_index()
 
                         if len(close) < 6:
@@ -509,41 +534,43 @@ class StocksDataEngine:
                         last_td_close  = float(s_confirmed.iloc[-1])   # e.g. Friday
                         prev_td_close  = float(s_confirmed.iloc[-2])   # e.g. Thursday
                         confirmed_date = s_confirmed.index[-1]
-                        if last_date is None or confirmed_date > last_date:
-                            last_date = confirmed_date
+                        has_today_bar  = bool((idx_naive.normalize() == today).any())
 
-                        # Prefer the live price whenever one is available.
+                        # Settled closes only — no intraday prices.
                         #
-                        # The old gate required yfinance to already carry a
-                        # daily candle for today. That candle can lag the live
-                        # feed by a full session, and when it does the whole
-                        # row falls back to the last CONFIRMED close — so 1D%
-                        # describes the two days before yesterday and is shown
-                        # as if current (AMZN read +15.32%, its Jul 31 earnings
-                        # gap, on Aug 4). fast_info.last_price is fresh even
-                        # when the daily bar has not been published yet, so key
-                        # off the live price itself rather than the candle.
+                        # yfinance's daily history can lag a full session: the
+                        # most recent trading day arrives with Close=NaN, so
+                        # s_confirmed ends a day early and every return silently
+                        # describes the session BEFORE the one it claims (AMZN
+                        # read +15.32%, its Jul 31 earnings gap, on Aug 4).
                         #
-                        # The reference close must move with the price: pair a
-                        # live price with the last confirmed close, and a
-                        # confirmed price with the close before it. Mixing the
-                        # two is what produced the stale figure.
-                        has_today = bool((idx_naive.normalize() == today).any())
-                        live_price = live_prices.get(symbol)
+                        # fast_info.previous_close carries that settled close
+                        # before it reaches the history, so prefer it when it is
+                        # genuinely newer than the newest bar we have. Its date
+                        # is the next trading day after last_td_close, which is
+                        # what the sheet must report.
+                        settled = (prev_closes or {}).get(symbol)
+                        gap_bar_date = None
+                        if not has_today_bar and settled:
+                            # A bar exists for the missing day (Open/High/Low
+                            # present, Close NaN) — that day is the settled one.
+                            gap_bar_date = next(
+                                (d for d in raw_dates
+                                 if d.normalize() > confirmed_date.normalize()),
+                                None,
+                            )
 
-                        if live_price:
-                            price = float(live_price)
-                            # If today's candle already exists, last_td_close is
-                            # yesterday. If it does not, last_td_close is still
-                            # the most recent close — the correct 1D reference
-                            # either way.
-                            ref = last_td_close
-                            change_1d = (price / ref - 1) * 100 if ref else np.nan
-                            if not has_today:
-                                used_live_ahead_of_candle = True
+                        if gap_bar_date is not None and settled:
+                            price     = float(settled)
+                            change_1d = (price / last_td_close - 1) * 100 if last_td_close else np.nan
+                            settled_date = gap_bar_date
                         else:
                             price     = last_td_close
                             change_1d = (last_td_close / prev_td_close - 1) * 100 if prev_td_close else np.nan
+                            settled_date = confirmed_date
+
+                        if last_date is None or settled_date > last_date:
+                            last_date = settled_date
 
                         # ATH: extend to live price in case of intraday new high
                         ath          = max(float(s.max()), price)
@@ -596,16 +623,7 @@ class StocksDataEngine:
         # are intraday — dating them to the last confirmed close would repeat
         # the exact mistake this pipeline is meant to avoid.
         if price_as_of is None:
-            if used_live_ahead_of_candle:
-                _tz_name  = "America/New_York" if market == "US" else "Asia/Kolkata"
-                _tz_label = "ET" if market == "US" else "IST"
-                _n = datetime.now(ZoneInfo(_tz_name))
-                price_as_of = (
-                    f"Price as on {_n.strftime('%b')} {_n.day}, {_n.year}"
-                    f"  ·  {int(_n.strftime('%I'))}:{_n.strftime('%M %p')} {_tz_label}"
-                    f"  (Live)"
-                )
-            elif last_date is not None:
+            if last_date is not None:
                 ld = pd.Timestamp(last_date)
                 price_as_of = f"Price as on {ld.strftime('%b')} {ld.day}, {ld.year}  (Close)"
             else:
@@ -615,7 +633,8 @@ class StocksDataEngine:
 
     # ── G&L price history (short pipeline) ───────────────────
 
-    def _fetch_price_history_gl(self, tickers: list, mcap_map: dict, live_prices: dict, market: str = "US") -> tuple:
+    def _fetch_price_history_gl(self, tickers: list, mcap_map: dict, live_prices: dict,
+                                prev_closes: dict | None = None, market: str = "US") -> tuple:
         """
         Download 1 month of daily data — enough for the 1W return needed by G&L.
         Much faster than the 4Y ATH download: smaller payload per batch,
@@ -665,6 +684,16 @@ class StocksDataEngine:
                         if close.isna().any() and "Adj Close" in sym_df.columns:
                             close = close.fillna(sym_df["Adj Close"])
 
+                        # Dates the provider returned a BAR for, including one
+                        # whose Close has not settled — used to date the settled
+                        # close correctly (see the US branch below).
+                        _all_idx  = sym_df.index
+                        raw_dates = list(
+                            _all_idx.tz_localize(None)
+                            if getattr(_all_idx, "tz", None) is not None
+                            else _all_idx
+                        )
+
                         close = close.dropna().sort_index()
 
                         if len(close) < 6:
@@ -682,21 +711,37 @@ class StocksDataEngine:
                             continue
                         prev_close = float(s_confirmed.iloc[-1])
                         _cd = s_confirmed.index[-1]
+
+                        # US: settled closes only. yfinance's daily history can
+                        # lag a session (latest row has Close=NaN), so take the
+                        # settled close from fast_info when it is newer than the
+                        # newest bar — same correction as the ATH pipeline, and
+                        # keep _cd pointing at the day actually used.
+                        _settled = (prev_closes or {}).get(symbol)
+                        _has_today_bar = bool((idx_naive.normalize() == today).any())
+                        _gap_date = None
+                        if not _has_today_bar and _settled:
+                            _gap_date = next(
+                                (d for d in raw_dates
+                                 if d.normalize() > _cd.normalize()), None)
+
+                        if market == "US":
+                            if _gap_date is not None and _settled:
+                                price = float(_settled)
+                                _cd   = _gap_date
+                            else:
+                                price = prev_close
+                        else:
+                            # India keeps intraday pricing during its session.
+                            _lp = live_prices.get(symbol)
+                            if _lp:
+                                price = float(_lp)
+                                used_live_price = True
+                            else:
+                                price = prev_close
+
                         if last_close_date is None or _cd > last_close_date:
                             last_close_date = _cd
-
-                        # Prefer the live price whenever one is available, not
-                        # only during the session. _is_market_open is a clock
-                        # check, so just after the close (and before yfinance
-                        # publishes the daily candle) it falls back to the last
-                        # CONFIRMED close — which can already be a session old,
-                        # dating the whole sheet to the wrong day.
-                        _lp = live_prices.get(symbol)
-                        if _lp:
-                            price = float(_lp)
-                            used_live_price = True
-                        else:
-                            price = prev_close
 
                         change_1w = (
                             (price / float(s_confirmed.iloc[-6]) - 1) * 100
@@ -1189,12 +1234,12 @@ class StocksDataEngine:
                     print(f"  US names: all {len(us_tickers)} already up-to-date")
 
                 # Fetch market caps + live prices in one pass, then filter universe
-                us_mcaps, us_live = self._fetch_market_caps(us_tickers)
+                us_mcaps, us_live, us_prev = self._fetch_market_caps(us_tickers)
                 us_filtered = [t for t in us_tickers if us_mcaps.get(t, 0) >= self.US_MCAP_FLOOR]
                 print(f"  Market cap filter: {len(us_filtered)}/{len(us_tickers)} tickers pass ${self.US_MCAP_FLOOR/1e9:.0f}B floor")
 
                 if run_gl:
-                    us_gl_df, us_gl_label = self._fetch_price_history_gl(us_filtered, us_mcaps, us_live, market="US")
+                    us_gl_df, us_gl_label = self._fetch_price_history_gl(us_filtered, us_mcaps, us_live, us_prev, market="US")
                     us_gainers, us_losers = self._derive_gl(us_gl_df, name_cache, "US")
                     if not us_gainers.empty:
                         self._write_gl_sheet("Top G&L US", us_gainers, us_losers, "US",
@@ -1203,7 +1248,7 @@ class StocksDataEngine:
                         print("  [WARN] US G&L: no stocks passed market cap filter.")
 
                 if run_ath:
-                    us_ath_df, us_ath_label = self._fetch_price_history_ath(us_filtered, us_mcaps, us_live, market="US")
+                    us_ath_df, us_ath_label = self._fetch_price_history_ath(us_filtered, us_mcaps, us_live, us_prev, market="US")
                     us_ath = self._derive_ath(us_ath_df, name_cache, "US")
                     self._write_ath_sheet("ATH US", us_ath, "US",
                                           price_as_of=us_ath_label, updated_at=updated_at)
@@ -1231,12 +1276,12 @@ class StocksDataEngine:
                     print(f"  India names: all {len(in_tickers)} already up-to-date")
 
                 # Fetch market caps + live prices in one pass, then filter universe
-                in_mcaps, in_live = self._fetch_market_caps(in_tickers)
+                in_mcaps, in_live, in_prev = self._fetch_market_caps(in_tickers)
                 in_filtered = [t for t in in_tickers if in_mcaps.get(t, 0) >= self.IN_MCAP_FLOOR]
                 print(f"  Market cap filter: {len(in_filtered)}/{len(in_tickers)} tickers pass Rs{self.IN_MCAP_FLOOR/1e7:.0f}Cr floor")
 
                 if run_gl:
-                    in_gl_df, in_gl_label = self._fetch_price_history_gl(in_filtered, in_mcaps, in_live, market="IN")
+                    in_gl_df, in_gl_label = self._fetch_price_history_gl(in_filtered, in_mcaps, in_live, in_prev, market="IN")
                     in_gainers, in_losers = self._derive_gl(in_gl_df, name_cache, "IN")
                     if not in_gainers.empty:
                         self._write_gl_sheet("Top G&L India", in_gainers, in_losers, "India",
@@ -1245,7 +1290,7 @@ class StocksDataEngine:
                         print("  [WARN] India G&L: no stocks passed market cap filter.")
 
                 if run_ath:
-                    in_ath_df, in_ath_label = self._fetch_price_history_ath(in_filtered, in_mcaps, in_live, market="IN")
+                    in_ath_df, in_ath_label = self._fetch_price_history_ath(in_filtered, in_mcaps, in_live, in_prev, market="IN")
                     in_ath = self._derive_ath(in_ath_df, name_cache, "IN")
                     self._write_ath_sheet("ATH India", in_ath, "India",
                                           price_as_of=in_ath_label, updated_at=updated_at)
