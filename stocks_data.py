@@ -448,24 +448,16 @@ class StocksDataEngine:
         total_b = len(batches)
         print(f"  Fetching price history — {len(tickers)} tickers, {total_b} batches...")
 
-        # Build the "price as of" label for the sheet header.
-        # US is settled-close only: intraday prices make 1D% drift through the
-        # session and never tie out against a source quoting closes, so the
-        # label is always resolved from the actual close date after the batch
-        # loop. India keeps the live label while its market is open.
-        if market_open and market != "US":
-            _tz_name  = "America/New_York" if market == "US" else "Asia/Kolkata"
-            _tz_label = "ET" if market == "US" else "IST"
-            _tz       = ZoneInfo(_tz_name)
-            _now      = datetime.now(_tz)
-            price_as_of = (
-                f"Price as on {_now.strftime('%b')} {_now.day}, {_now.year}"
-                f"  ·  {int(_now.strftime('%I'))}:{_now.strftime('%M %p')} {_tz_label}"
-                f"  (Live)"
-            )
-            print(f"  Market is OPEN — live prices will be used where available")
-        else:
-            price_as_of = None   # filled from last_date after batch loop
+        # The "price as of" label is always resolved from the close date
+        # actually used, after the batch loop — never from the clock.
+        #
+        # Both markets are settled-close only. Intraday prices make 1D% drift
+        # through the session and never tie out against a source quoting
+        # closes. The bug this replaces stamped "(Live)" from _is_market_open
+        # while the rows held day-old closes: a run shortly after the open
+        # finds no fresh candle, silently falls back to the last close, and the
+        # clock-based label then misdated the whole sheet by a session.
+        price_as_of = None   # filled from last_date after batch loop
 
         today = pd.Timestamp.now().normalize()
 
@@ -550,23 +542,37 @@ class StocksDataEngine:
                         # is the next trading day after last_td_close, which is
                         # what the sheet must report.
                         settled = (prev_closes or {}).get(symbol)
+
+                        # Use the newest SETTLED close.
+                        #
+                        # s_confirmed excludes today, so mid-session it already
+                        # ends on the correct day. The gap case is different:
+                        # after a session closes, the provider may carry a bar
+                        # for it with Close=NaN (Open/High/Low only) while
+                        # fast_info.previous_close already holds that settled
+                        # close. Without this, the sheet reports the session
+                        # before the last one — the original AMZN +15.32% bug.
+                        #
+                        # Only trust `settled` when a bar exists past
+                        # confirmed_date AND that bar has no close of its own;
+                        # mid-session `previous_close` is just last_td_close, so
+                        # taking it then would change nothing but risks pairing
+                        # a stale reference with a fresh price.
                         gap_bar_date = None
                         if not has_today_bar and settled:
-                            # A bar exists for the missing day (Open/High/Low
-                            # present, Close NaN) — that day is the settled one.
                             gap_bar_date = next(
                                 (d for d in raw_dates
                                  if d.normalize() > confirmed_date.normalize()),
                                 None,
                             )
 
-                        if gap_bar_date is not None and settled:
-                            price     = float(settled)
-                            change_1d = (price / last_td_close - 1) * 100 if last_td_close else np.nan
+                        if gap_bar_date is not None:
+                            price        = float(settled)
+                            change_1d    = (price / last_td_close - 1) * 100 if last_td_close else np.nan
                             settled_date = gap_bar_date
                         else:
-                            price     = last_td_close
-                            change_1d = (last_td_close / prev_td_close - 1) * 100 if prev_td_close else np.nan
+                            price        = last_td_close
+                            change_1d    = (last_td_close / prev_td_close - 1) * 100 if prev_td_close else np.nan
                             settled_date = confirmed_date
 
                         if last_date is None or settled_date > last_date:
@@ -644,11 +650,8 @@ class StocksDataEngine:
             Ticker | MarketCap | Price | Change1W
         """
         all_rows    = []
-        market_open = self._is_market_open(market)
-        # Track what the rows actually contain so the label can describe them
-        # accurately: whether any live price was used, and the newest confirmed
-        # close date seen across the universe.
-        used_live_price = False
+        # Newest settled close date seen across the universe — drives the
+        # sheet label, so it must track the close actually used per stock.
         last_close_date = None
         batches     = [
             tickers[i:i + self.PRICE_BATCH_SIZE]
@@ -725,20 +728,12 @@ class StocksDataEngine:
                                 (d for d in raw_dates
                                  if d.normalize() > _cd.normalize()), None)
 
-                        if market == "US":
-                            if _gap_date is not None and _settled:
-                                price = float(_settled)
-                                _cd   = _gap_date
-                            else:
-                                price = prev_close
+                        # Both markets: settled closes only, same rule as ATH.
+                        if _gap_date is not None:
+                            price = float(_settled)
+                            _cd   = _gap_date
                         else:
-                            # India keeps intraday pricing during its session.
-                            _lp = live_prices.get(symbol)
-                            if _lp:
-                                price = float(_lp)
-                                used_live_price = True
-                            else:
-                                price = prev_close
+                            price = prev_close
 
                         if last_close_date is None or _cd > last_close_date:
                             last_close_date = _cd
@@ -767,23 +762,13 @@ class StocksDataEngine:
             except Exception as e:
                 print(f"\n  [WARN] Batch {batch_idx} error: {e}")
 
-        # Build price label. Live prices are now used whenever available, so
-        # the label keys off what the rows actually contain rather than the
-        # clock. The old else-branch stamped TODAY's date with "(Close)" even
+        # Build the price label from the close date actually used, never from
+        # the clock. The old branch stamped TODAY's date with "(Close)" even
         # when the figures came from an earlier session — Top G&L US read
         # "Price as on Aug 4 (Close)" while ATH US, on the same data, said
-        # Jul 31. Report the real date instead.
-        _tz_name  = "America/New_York" if market == "US" else "Asia/Kolkata"
-        _tz_label = "ET" if market == "US" else "IST"
-        _now      = datetime.now(ZoneInfo(_tz_name))
-
-        if used_live_price:
-            price_as_of = (
-                f"Price as on {_now.strftime('%b')} {_now.day}, {_now.year}"
-                f"  ·  {int(_now.strftime('%I'))}:{_now.strftime('%M %p')} {_tz_label}"
-                f"  (Live)"
-            )
-        elif last_close_date is not None:
+        # Jul 31 — and a clock-based "(Live)" label misdated ATH India by a
+        # full session when a run just after the open found no fresh prices.
+        if last_close_date is not None:
             ld = pd.Timestamp(last_close_date)
             price_as_of = f"Price as on {ld.strftime('%b')} {ld.day}, {ld.year}  (Close)"
         else:
