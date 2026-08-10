@@ -620,7 +620,26 @@ class ZerodhaDataEngine:
             print(f"  [WARN] {ticker}: not found in instrument cache")
             return ["NA"] * 8
         try:
-            candles = self.kite.historical_data(token, start_date, end_date, "day")
+            # Kite rate-limits historical_data (~3 req/s) and KITE_WORKERS
+            # fires several at once, so a burst gets throttled. Without a
+            # retry a single throttled call stamped NA across that index's
+            # whole row and stayed there until the next full run — which is
+            # how ten NIFTY sector/index rows ended up blank while the same
+            # tickers fetched fine seconds later. Retry with backoff.
+            candles = None
+            for attempt in range(3):
+                try:
+                    candles = self.kite.historical_data(token, start_date, end_date, "day")
+                    if candles:
+                        break
+                except Exception as e:
+                    if attempt == 2:
+                        raise
+                    print(f"  [RETRY] {ticker}: {type(e).__name__} "
+                          f"(attempt {attempt + 1}/3)")
+                if attempt < 2:
+                    time.sleep(0.5 * (attempt + 1))
+
             if not candles:
                 print(f"  [WARN] {ticker}: Kite returned empty candles (token={token})")
                 return ["NA"] * 8
@@ -759,6 +778,13 @@ class ZerodhaDataEngine:
                 ticker, sheet_row = future_to_meta[future]
                 returns           = ReturnCalculator.clean(future.result())
                 pe                = self._pe_for(ticker, pe_map)
+                # A fetch that failed outright returns all-NA. Writing that
+                # would replace a good previous value with a blank, so skip
+                # the row and leave last run's figures in place — stale data
+                # beats no data, and the next run refreshes it.
+                if all(v == "NA" for v in returns):
+                    print(f"  [SKIP] {ticker}: fetch failed, keeping previous values")
+                    continue
                 updates.append({
                     "range":  f"D{sheet_row}:L{sheet_row}",
                     "values": [[returns[0], pe] + returns[1:]],
@@ -813,6 +839,13 @@ class ZerodhaDataEngine:
                 ticker, sheet_row = future_to_meta[future]
                 returns           = ReturnCalculator.clean(future.result())
                 pe                = self._pe_for(ticker, pe_map)
+                # A fetch that failed outright returns all-NA. Writing that
+                # would replace a good previous value with a blank, so skip
+                # the row and leave last run's figures in place — stale data
+                # beats no data, and the next run refreshes it.
+                if all(v == "NA" for v in returns):
+                    print(f"  [SKIP] {ticker}: fetch failed, keeping previous values")
+                    continue
                 updates.append({
                     "range":  f"D{sheet_row}:L{sheet_row}",
                     "values": [[returns[0], pe] + returns[1:]],
