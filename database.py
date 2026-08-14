@@ -45,10 +45,21 @@ def _is_market_open(market: str) -> bool:
     return now.weekday() < 5 and open_t <= now <= close_t
 
 
-def _make_metadata(market: str):
+def _make_metadata(market: str, price_date=None):
     """
     Build (price_as_of, updated_at) strings for sheet A1/A2 metadata cells.
-    market: "US", "IN", "CRYPTO", or "NAV"
+    market: "US", "IN", "CRYPTO", "GLOBAL", or "NAV"
+
+    price_date: the date of the data actually written, when the caller knows
+    it. Pass it for anything priced off settled closes — the label is then
+    derived from the data instead of the clock.
+
+    Why that matters: keying the label off _is_market_open alone stamped
+    "(Live)" on rows that were nothing of the sort. A run at 9:22 AM IST, seven
+    minutes after the NSE open, finds no daily candle for today yet and falls
+    back to the previous close — so the NIFTY sheets carried Aug 13 closes
+    under an "Aug 14 (Live)" header. The clock cannot tell you what the data
+    is; only the data can.
     """
     ist     = ZoneInfo("Asia/Kolkata")
     now_ist = datetime.now(ist)
@@ -76,6 +87,27 @@ def _make_metadata(market: str):
             )
         else:
             price_as_of = f"Price as on {now.strftime('%b')} {now.day}, {now.year}"
+    elif price_date is not None:
+        # The caller knows which session the figures came from — always prefer
+        # it over the clock. The suffix still depends on whether that session
+        # has finished: mid-session Kite's newest candle is today's, but it is
+        # an unsettled intraday bar, so calling it a close would assert a close
+        # that has not happened.
+        pd_       = price_date
+        tz_name   = "America/New_York" if market == "US" else "Asia/Kolkata"
+        local_now = datetime.now(ZoneInfo(tz_name))
+        is_today  = (pd_.year, pd_.month, pd_.day) == (
+            local_now.year, local_now.month, local_now.day)
+
+        if is_today and _is_market_open(market):
+            tz_label = "ET" if market == "US" else "IST"
+            price_as_of = (
+                f"Price as on {pd_.strftime('%b')} {pd_.day}, {pd_.year}"
+                f"  ·  {int(local_now.strftime('%I'))}:{local_now.strftime('%M %p')} {tz_label}"
+                f"  (Live)"
+            )
+        else:
+            price_as_of = f"Price as on {pd_.strftime('%b')} {pd_.day}, {pd_.year}  (Close)"
     elif _is_market_open(market):
         tz_name  = "America/New_York" if market == "US" else "Asia/Kolkata"
         tz_label = "ET" if market == "US" else "IST"
@@ -672,6 +704,28 @@ class ZerodhaDataEngine:
         start_date = end_date - relativedelta(years=4)
         return self._fetch_index_returns(zerodha_ticker, start_date, end_date)
 
+    def _latest_price_date(self, reference_ticker: str = "NIFTY 50"):
+        """Date of the newest candle Kite actually has, from one reference
+        index. Used to label the sheet with the session the figures came from.
+
+        Kite publishes a day's candle only once the session is under way, so a
+        run shortly after the open sees yesterday as the newest bar — which is
+        exactly what the prices then reflect. Reading this from the data (once,
+        outside the thread pool) keeps the label honest without racing the
+        parallel fetches."""
+        token = self.index_token_map.get(reference_ticker)
+        if not token:
+            return None
+        try:
+            end   = datetime.now()
+            start = end - relativedelta(days=15)
+            candles = self.kite.historical_data(token, start, end, "day")
+            if not candles:
+                return None
+            return pd.to_datetime(candles[-1]["date"]).tz_localize(None)
+        except Exception:
+            return None
+
     # Zerodha tradingsymbol → NSE allIndices "index" name (used only when they differ)
     _NSE_PE_NAME_OVERRIDES = {
         "NIFTY FIN SERVICE":   "NIFTY FINANCIAL SERVICES",
@@ -797,7 +851,9 @@ class ZerodhaDataEngine:
         worksheet.sort((7, 'des'), range="A4:M17")
         worksheet.sort((7, 'des'), range="A21:M28")
 
-        price_as_of, updated_at = _make_metadata("IN")
+        # Label from the session the data came from, not the clock.
+        price_as_of, updated_at = _make_metadata(
+            "IN", price_date=self._latest_price_date())
         self.sheet_client.batch_update(worksheet, [
             {"range": "A1", "values": [[price_as_of]]},
             {"range": "A2", "values": [[updated_at]]},
@@ -857,7 +913,9 @@ class ZerodhaDataEngine:
         # Range extends to col M so the Tradingview column moves with its row.
         worksheet.sort((7, 'des'), range="A4:M17")
 
-        price_as_of, updated_at = _make_metadata("IN")
+        # Label from the session the data came from, not the clock.
+        price_as_of, updated_at = _make_metadata(
+            "IN", price_date=self._latest_price_date())
         self.sheet_client.batch_update(worksheet, [
             {"range": "A1", "values": [[price_as_of]]},
             {"range": "A2", "values": [[updated_at]]},
