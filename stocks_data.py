@@ -448,6 +448,65 @@ class StocksDataEngine:
                   f"will be missing from ATH/G&L output.")
         return mcap_map, live_prices, prev_closes
 
+    # Liquid, always-traded reference used to establish which session the
+    # sheet should be priced from. These names trade every session, so their
+    # newest bar is the market's newest bar.
+    _SESSION_REFERENCE = {
+        "US": ["SPY", "AAPL", "MSFT"],
+        "IN": ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS"],
+    }
+
+    def _latest_settled_session(self, market: str = "US"):
+        """The most recent SETTLED session for a market, as a normalised date.
+
+        Individual tickers cannot be trusted to answer this: a thinly traded
+        name may simply have no bar for a session (AZAD had Aug 14, Aug 17 and
+        Aug 19 but no Aug 18), so letting each row use its own newest bar mixes
+        sessions within one table. Resolve it once from liquid references and
+        hold every row to it.
+
+        A session counts as settled only once its close exists. Mid-session the
+        provider already carries today's bar with a live, still-moving close,
+        so today is excluded unless the market has closed.
+        """
+        refs = self._SESSION_REFERENCE.get(market, self._SESSION_REFERENCE["US"])
+        today = pd.Timestamp.now().normalize()
+        market_open = self._is_market_open(market)
+
+        best = None
+        for sym in refs:
+            try:
+                hist = yf.download(sym, period="1mo", auto_adjust=False,
+                                   progress=False)
+                col = hist["Close"]
+                if hasattr(col, "columns"):
+                    col = col.iloc[:, 0]
+                col = col.dropna()
+                if col.empty:
+                    continue
+                idx = col.index
+                idx = idx.tz_localize(None) if getattr(idx, "tz", None) is not None else idx
+                dates = [d.normalize() for d in idx]
+                # Drop today while the session is still running — its close has
+                # not settled yet.
+                if market_open:
+                    dates = [d for d in dates if d < today]
+                if not dates:
+                    continue
+                cand = max(dates)
+                if best is None or cand > best:
+                    best = cand
+            except Exception:
+                continue
+
+        if best is not None:
+            print(f"  Pricing session: {best.date()} "
+                  f"({'market open, today excluded' if market_open else 'market closed'})")
+        else:
+            print("  [WARN] could not resolve a pricing session from reference "
+                  "tickers; falling back to each ticker's newest settled bar.")
+        return best
+
     def _download_batch_with_retry(self, batch: list, period: str = "max"):
         """yf.download for a batch, retrying and then splitting on throttle.
 
@@ -553,6 +612,14 @@ class StocksDataEngine:
         # label, so it must track the close actually used per stock — not the
         # newest bar yfinance happens to carry.
         last_date   = None
+        # Session every row must be priced from. Without this each ticker fell
+        # back to its OWN newest bar, so one table mixed sessions: a run on
+        # Aug 19 produced 41 rows priced Aug 17, 49 priced Aug 18 and 1 priced
+        # Aug 19, all under a single "Aug 18" header. Rows priced on different
+        # days cannot be compared with each other, which is the whole point of
+        # the sheet. Resolved once from a liquid reference below.
+        target_session = self._latest_settled_session(market)
+        stale_skipped  = []   # (symbol, its newest session) for reporting
         market_open = self._is_market_open(market)
         batches     = [
             tickers[i:i + self.PRICE_BATCH_SIZE]
@@ -635,16 +702,37 @@ class StocksDataEngine:
                             idx_naive = raw_idx
                         s = pd.Series(close.values, index=idx_naive)
 
-                        # s_confirmed = all closes before today (only trading days
-                        # — yfinance never returns weekends/holidays).
-                        # iloc[-1] = last trading day, iloc[-2] = the one before.
-                        s_confirmed = s[idx_naive.normalize() < today]
+                        # Closes up to and including the target session, so
+                        # every row in the sheet is priced from the SAME day.
+                        #
+                        # This used to be `< today`, which had two failure
+                        # modes. It discarded today's close even after the
+                        # market had shut, leaving the sheet a session behind;
+                        # and because each ticker then fell back to its own
+                        # newest bar, a name missing that session (AZAD had no
+                        # Aug 18 bar) silently dropped another day further
+                        # back, mixing sessions inside one table.
+                        cutoff = target_session if target_session is not None else (
+                            today - pd.Timedelta(days=1)
+                        )
+                        s_confirmed = s[idx_naive.normalize() <= cutoff]
                         if len(s_confirmed) < 2:
                             continue
                         last_td_close  = float(s_confirmed.iloc[-1])   # e.g. Friday
                         prev_td_close  = float(s_confirmed.iloc[-2])   # e.g. Thursday
                         confirmed_date = s_confirmed.index[-1]
                         has_today_bar  = bool((idx_naive.normalize() == today).any())
+
+                        # Drop rows that cannot reach the target session. A
+                        # ticker with no bar for it would otherwise be shown
+                        # with an older close beside up-to-date rows, and
+                        # nothing in the sheet would reveal the difference.
+                        if (target_session is not None
+                                and confirmed_date.normalize() < target_session):
+                            stale_skipped.append(
+                                (symbol, str(confirmed_date.date()))
+                            )
+                            continue
 
                         # Settled closes only — no intraday prices.
                         #
@@ -748,6 +836,15 @@ class StocksDataEngine:
             except Exception as e:
                 print(f"\n  [WARN] Batch {batch_idx} error: {e}")
 
+        if stale_skipped:
+            print(f"  [STALE] {len(stale_skipped)} ticker(s) had no bar for "
+                  f"{target_session.date()} and were excluded rather than shown "
+                  f"with an older price:")
+            for sym, dt in stale_skipped[:10]:
+                print(f"      {sym} (newest {dt})")
+            if len(stale_skipped) > 10:
+                print(f"      ... and {len(stale_skipped) - 10} more")
+
         # Finalise EOD label using the last confirmed date across all stocks.
         # If live prices were used before today's candle existed, the figures
         # are intraday — dating them to the last confirmed close would repeat
@@ -777,6 +874,8 @@ class StocksDataEngine:
         # Newest settled close date seen across the universe — drives the
         # sheet label, so it must track the close actually used per stock.
         last_close_date = None
+        # One pricing session for every row (see _latest_settled_session).
+        target_session  = self._latest_settled_session(market)
         batches     = [
             tickers[i:i + self.PRICE_BATCH_SIZE]
             for i in range(0, len(tickers), self.PRICE_BATCH_SIZE)
@@ -830,7 +929,13 @@ class StocksDataEngine:
                             idx_naive = raw_idx
                         s = pd.Series(close.values, index=idx_naive)
 
-                        s_confirmed = s[idx_naive.normalize() < today]
+                        # Pin to one session for the whole sheet — see the
+                        # ATH pipeline: per-ticker fallback mixed sessions
+                        # inside a single table.
+                        cutoff = target_session if target_session is not None else (
+                            today - pd.Timedelta(days=1)
+                        )
+                        s_confirmed = s[idx_naive.normalize() <= cutoff]
                         if s_confirmed.empty:
                             continue
                         prev_close = float(s_confirmed.iloc[-1])
