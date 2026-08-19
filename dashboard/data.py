@@ -43,8 +43,29 @@ def _http_session():
     return AuthorizedSession(creds)
 
 
+@st.cache_resource
+def _spreadsheet():
+    """The opened spreadsheet handle.
+
+    open_by_key costs a full API round trip (~1.3s), and _ws() called it on
+    every single lookup — 28 call sites, several of them hit more than once
+    per page (_attach_col_links re-opens the sheet per link column). That put
+    a couple of seconds of pure connection overhead in front of every section
+    before a single cell was read. The handle is just an ID wrapper, so it is
+    safe to hold for the life of the process."""
+    return _client().open_by_key(SHEET_ID)
+
+
+@st.cache_resource
 def _ws(name: str):
-    return _client().open_by_key(SHEET_ID).worksheet(name)
+    """Worksheet handle by title, cached per name.
+
+    worksheet(name) is itself a round trip (it fetches sheet metadata to
+    resolve the title), so caching the handle removes that cost too. Cell
+    reads still go to the API on every call, so data stays as fresh as the
+    @st.cache_data TTL on the loaders allows — only the connection plumbing
+    is reused."""
+    return _spreadsheet().worksheet(name)
 
 
 def _fetch_links(sheet_title: str, range_str: str) -> list[str | None]:
@@ -92,7 +113,8 @@ def _expected_col_count(range_str: str) -> int | None:
 
 
 def _range_to_df(ws, range_str: str, header_idx: int | None = None,
-                 keep_blank_cols: bool = False) -> pd.DataFrame:
+                 keep_blank_cols: bool = False,
+                 values: list | None = None) -> pd.DataFrame:
     """
     Read a cell range from a worksheet.
     First non-empty row is treated as headers unless header_idx is specified.
@@ -100,8 +122,12 @@ def _range_to_df(ws, range_str: str, header_idx: int | None = None,
     keep_blank_cols=True preserves columns whose header cell is blank
     (instead of silently dropping them) — useful when a sheet column may
     have a missing header but the data is still wanted.
+    values: already-fetched cell values for `range_str`. Pass them when the
+    caller needs the raw rows anyway (e.g. to feed _attach_col_links) so the
+    same range is not fetched twice.
     """
-    values = ws.get(range_str)
+    if values is None:
+        values = ws.get(range_str)
     if not values:
         return pd.DataFrame()
 
@@ -154,7 +180,8 @@ def _range_to_df(ws, range_str: str, header_idx: int | None = None,
 
 def _attach_col_links(df: pd.DataFrame, sheet_title: str, full_range: str,
                       link_cols: list[tuple[str, str]],
-                      header_idx: int = 0) -> pd.DataFrame:
+                      header_idx: int = 0,
+                      raw_values: list | None = None) -> pd.DataFrame:
     """Augment `df` with one sidecar `__link__<header>` column per entry in
     `link_cols`. Each entry is (sheet_column_letter, df_header_name) — the
     sheet column whose hyperlinks should populate the sidecar for the given
@@ -167,10 +194,15 @@ def _attach_col_links(df: pd.DataFrame, sheet_title: str, full_range: str,
     if df.empty or not link_cols:
         return df
 
-    # Re-fetch the full range's text once so we can detect blank rows the
-    # same way `_range_to_df` did, keeping link rows aligned with df rows.
-    ws = _ws(sheet_title)
-    raw_values = ws.get(full_range)[header_idx + 1:]   # drop header line
+    # We need the range's raw text to detect blank rows the same way
+    # `_range_to_df` did, keeping link rows aligned with df rows. The caller
+    # has almost always just read exactly this range, so let it hand the
+    # values over rather than paying a second identical round trip — that
+    # duplicate fetch was a large part of why the NIFTY sections were the
+    # slowest on the page (two tables, each re-reading its own range).
+    if raw_values is None:
+        raw_values = _ws(sheet_title).get(full_range)
+    raw_values = raw_values[header_idx + 1:]   # drop header line
 
     # Derive the row span from the full range (e.g. "B3:M17" -> rows 3..17)
     import re
@@ -240,22 +272,28 @@ def load_global_indices():
 @st.cache_data(ttl=28800)
 def load_nifty_indices():
     ws = _ws("NIFTY Indices")
-    t1 = _range_to_df(ws, "B3:M17", keep_blank_cols=True)
-    t2 = _range_to_df(ws, "B20:M28", keep_blank_cols=True)
+    # Read each range once and reuse the raw values for the link sidecars,
+    # instead of letting _attach_col_links fetch the same range again.
+    r1, r2 = "B3:M17", "B20:M28"
+    v1, v2 = ws.get(r1), ws.get(r2)
+    t1 = _range_to_df(ws, r1, keep_blank_cols=True, values=v1)
+    t2 = _range_to_df(ws, r2, keep_blank_cols=True, values=v2)
     # Attach hyperlinks for the Index Name col (B) and the Tradingview col (M)
     t1_links = [("B", t1.columns[0]), ("M", "Tradingview")] if not t1.empty else []
     t2_links = [("B", t2.columns[0]), ("M", "Tradingview")] if not t2.empty else []
-    t1 = _attach_col_links(t1, "NIFTY Indices", "B3:M17", t1_links)
-    t2 = _attach_col_links(t2, "NIFTY Indices", "B20:M28", t2_links)
+    t1 = _attach_col_links(t1, "NIFTY Indices", r1, t1_links, raw_values=v1)
+    t2 = _attach_col_links(t2, "NIFTY Indices", r2, t2_links, raw_values=v2)
     return t1, t2
 
 
 @st.cache_data(ttl=28800)
 def load_nifty_sectors():
     ws = _ws("NIFTY Sectors")
-    df = _range_to_df(ws, "B3:M17", keep_blank_cols=True)
+    rng = "B3:M17"
+    vals = ws.get(rng)
+    df = _range_to_df(ws, rng, keep_blank_cols=True, values=vals)
     links = [("B", df.columns[0]), ("M", "Tradingview")] if not df.empty else []
-    return _attach_col_links(df, "NIFTY Sectors", "B3:M17", links)
+    return _attach_col_links(df, "NIFTY Sectors", rng, links, raw_values=vals)
 
 
 @st.cache_data(ttl=28800)
