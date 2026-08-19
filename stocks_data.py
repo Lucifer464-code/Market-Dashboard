@@ -148,8 +148,14 @@ class StocksDataEngine:
     NAME_CACHE_FILE = "ticker_names.csv"
 
     # ── Batch settings ────────────────────────────────────────
-    PRICE_BATCH_SIZE = 500   # larger batches = fewer round trips
-    MCAP_WORKERS     = 12    # parallel threads for market cap prefetch (too high triggers 401)
+    # 500-ticker batches reliably trip yfinance's rate limiter: one such
+    # request came back with 499 of 500 symbols throttled. yf.download does not
+    # raise in that case — it returns all-NaN columns, which the per-symbol
+    # loop skips silently — so the run simply lost those stocks and reported
+    # success. Smaller batches stay under the limit; the extra round trips are
+    # far cheaper than silently dropping half the universe.
+    PRICE_BATCH_SIZE = 100
+    MCAP_WORKERS     = 8     # parallel threads for market cap prefetch (too high triggers 401/429)
 
     HEADERS = {
         "User-Agent": (
@@ -391,17 +397,124 @@ class StocksDataEngine:
         mcap_map    = {}
         live_prices = {}
         prev_closes = {}
+        failed      = []
         with ThreadPoolExecutor(max_workers=self.MCAP_WORKERS) as pool:
             for symbol, mcap, last_price, prev_close in pool.map(_get, tickers):
                 if mcap:
                     mcap_map[symbol] = mcap
+                else:
+                    failed.append(symbol)
                 if last_price:
                     live_prices[symbol] = last_price
                 if prev_close:
                     prev_closes[symbol] = prev_close
 
+        # A ticker whose fast_info never resolved used to just vanish: it fell
+        # out of mcap_map, so the market-cap filter dropped it and it never
+        # reached the price stage at all. Nothing distinguished "this stock is
+        # too small" from "yfinance rate-limited us", which is how ATH India
+        # silently lost whole stretches of the alphabet — 134 of 749 tickers on
+        # one run, clustered wherever the throttling happened to land.
+        #
+        # Retry the stragglers serially. fast_info is one network call per
+        # ticker and the failures are load-induced, so a slower second pass
+        # recovers most of them.
+        if failed:
+            print(f"  [RETRY] {len(failed)} ticker(s) unresolved — retrying serially...")
+            recovered = 0
+            for symbol in failed:
+                try:
+                    fi   = yf.Ticker(symbol).fast_info
+                    mcap = fi.market_cap
+                    if mcap:
+                        mcap_map[symbol] = float(mcap)
+                        recovered += 1
+                        lp = getattr(fi, "last_price", None)
+                        pc = getattr(fi, "previous_close", None)
+                        if lp:
+                            live_prices[symbol] = float(lp)
+                        if pc:
+                            prev_closes[symbol] = float(pc)
+                except Exception:
+                    pass
+                time.sleep(0.15)
+            print(f"  [RETRY] recovered {recovered}/{len(failed)}")
+
+        still_missing = len(tickers) - len(mcap_map)
         print(f"  Market caps: {len(mcap_map)}/{len(tickers)} tickers resolved")
+        if still_missing:
+            # Loud, because these are excluded from every downstream sheet.
+            print(f"  [WARN] {still_missing} ticker(s) have no market cap and "
+                  f"will be missing from ATH/G&L output.")
         return mcap_map, live_prices, prev_closes
+
+    def _download_batch_with_retry(self, batch: list, period: str = "max"):
+        """yf.download for a batch, retrying and then splitting on throttle.
+
+        yfinance signals rate limiting by returning all-NaN columns rather
+        than raising, so "did this work?" has to be answered by inspecting the
+        data. Coverage is measured as the share of symbols with a usable close
+        series; anything well below full is treated as throttled.
+        """
+        def _coverage(df, syms):
+            if df is None or df.empty:
+                return 0.0
+            ok = 0
+            for s in syms:
+                try:
+                    col = df[s]["Close"] if len(syms) > 1 else df["Close"]
+                    if col.dropna().shape[0] >= 6:
+                        ok += 1
+                except Exception:
+                    pass
+            return ok / max(len(syms), 1)
+
+        def _fetch(syms):
+            return yf.download(syms, period=period, auto_adjust=False,
+                               group_by="ticker", threads=True, progress=False)
+
+        data = None
+        for attempt in range(3):
+            try:
+                data = _fetch(batch)
+            except Exception as e:
+                print(f"\n  [WARN] batch download error: {type(e).__name__}: {e}")
+                data = None
+            cov = _coverage(data, batch)
+            if cov >= 0.9:
+                return data
+            if attempt < 2:
+                wait = 5 * (attempt + 1)
+                print(f"\n  [RETRY] batch coverage {cov:.0%} — likely rate "
+                      f"limited; waiting {wait}s (attempt {attempt + 1}/3)")
+                time.sleep(wait)
+
+        # Still short: split into smaller chunks, which the limiter tolerates
+        # far better than one large request.
+        if len(batch) > 50:
+            print(f"\n  [SPLIT] retrying {len(batch)} tickers in chunks of 50")
+            merged = {}
+            for i in range(0, len(batch), 50):
+                chunk = batch[i:i + 50]
+                for chunk_attempt in range(2):
+                    try:
+                        sub = _fetch(chunk)
+                    except Exception:
+                        sub = None
+                    if _coverage(sub, chunk) >= 0.5:
+                        break
+                    time.sleep(3)
+                if sub is not None and not sub.empty:
+                    for s in chunk:
+                        try:
+                            merged[s] = sub[s] if len(chunk) > 1 else sub
+                        except Exception:
+                            pass
+                time.sleep(1)
+            if merged:
+                return pd.concat(merged, axis=1)
+
+        return data
 
     # ── Market hours check ────────────────────────────────────
 
@@ -470,15 +583,20 @@ class StocksDataEngine:
 
         for batch_idx, batch in enumerate(batches, 1):
             print(f"  Batch {batch_idx}/{total_b}...", end=" ", flush=True)
+            rows_before = len(all_rows)
             try:
-                data = yf.download(
-                    batch,
-                    period      = "max",
-                    auto_adjust = False,
-                    group_by    = "ticker",
-                    threads     = True,
-                    progress    = False,
-                )
+                # yf.download does NOT raise when it is rate-limited — it
+                # returns a frame full of NaNs. The per-symbol loop below then
+                # sees len(close) < 6 and quietly skips, so a throttled batch
+                # drops every one of its tickers while still printing
+                # "N stocks collected". That is how ATH India lost whole
+                # stretches of the alphabet: one 500-ticker batch came back
+                # 499/500 rate-limited and nothing said so.
+                #
+                # Retry the batch until enough symbols carry real data, then
+                # fall back to smaller sub-batches, which are far less likely
+                # to trip the limiter.
+                data = self._download_batch_with_retry(batch)
 
                 for symbol in batch:
                     try:
@@ -619,7 +737,13 @@ class StocksDataEngine:
                     except Exception:
                         continue
 
-                print(f"{len(all_rows)} stocks collected")
+                # Report per-batch yield: a batch that returns far fewer
+                # rows than tickers means the download was throttled, and
+                # that must be visible rather than inferred later from a
+                # short sheet.
+                got = len(all_rows) - rows_before
+                flag = "" if got >= len(batch) * 0.8 else "  [LOW YIELD]"
+                print(f"{got}/{len(batch)} stocks collected{flag}")
 
             except Exception as e:
                 print(f"\n  [WARN] Batch {batch_idx} error: {e}")
@@ -664,15 +788,12 @@ class StocksDataEngine:
 
         for batch_idx, batch in enumerate(batches, 1):
             print(f"  Batch {batch_idx}/{total_b}...", end=" ", flush=True)
+            rows_before = len(all_rows)
             try:
-                data = yf.download(
-                    batch,
-                    period      = "1mo",
-                    auto_adjust = False,
-                    group_by    = "ticker",
-                    threads     = True,
-                    progress    = False,
-                )
+                # Same throttle handling as the ATH pipeline: a rate-limited
+                # yf.download returns all-NaN rather than raising, which would
+                # silently drop the batch's tickers from the G&L universe.
+                data = self._download_batch_with_retry(batch, period="1mo")
 
                 for symbol in batch:
                     try:
@@ -757,7 +878,13 @@ class StocksDataEngine:
                     except Exception:
                         continue
 
-                print(f"{len(all_rows)} stocks collected")
+                # Report per-batch yield: a batch that returns far fewer
+                # rows than tickers means the download was throttled, and
+                # that must be visible rather than inferred later from a
+                # short sheet.
+                got = len(all_rows) - rows_before
+                flag = "" if got >= len(batch) * 0.8 else "  [LOW YIELD]"
+                print(f"{got}/{len(batch)} stocks collected{flag}")
 
             except Exception as e:
                 print(f"\n  [WARN] Batch {batch_idx} error: {e}")
