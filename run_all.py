@@ -1,7 +1,7 @@
 """
 Run the sheet-update jobs concurrently, and optionally the live ticker.
 
-    python run_all.py                # database.py + stocks_data.py
+    python run_all.py                # database.py + stocks_data.py (+ highs)
     python run_all.py --with-live    # also start the live market ticker
     python run_all.py --live-only    # ONLY the live ticker
     python run_all.py -- --us-only   # forward args to stocks_data.py
@@ -9,6 +9,16 @@ Run the sheet-update jobs concurrently, and optionally the live ticker.
 Each script's stdout/stderr is streamed live, prefixed with its label so
 the output streams remain readable when interleaved. Exit code is the max
 of the child exit codes (non-zero if any failed).
+
+Follow-on jobs
+--------------
+After stocks_data.py finishes, run_all starts StockMonitor's highs_data.py
+(../StockMonitor, using that repo's own venv when present). It runs strictly
+after stocks_data.py, never alongside it, so the two do not hit yfinance at
+the same time. database.py is unaffected and still runs in parallel with the
+whole stocks -> highs chain. The follow-on runs even if stocks_data.py failed,
+since the two write independent data. If the StockMonitor folder is missing it
+is skipped with a message. Arguments after "--" go to stocks_data.py only.
 
 Why the ticker is opt-in
 ------------------------
@@ -63,12 +73,64 @@ BATCH_JOBS = [
     ("stocks",   ["stocks_data.py"]),
 ]
 
+# StockMonitor is a sibling repo. Its nightly highs job reads the same yfinance
+# feed as stocks_data.py, so it is chained after that job rather than run beside it.
+STOCKMONITOR_ROOT = ROOT.parent / "StockMonitor"
+FOLLOW_ON = {"stocks": ("highs", "highs_data.py")}
+
+
+def _stockmonitor_python() -> str:
+    """StockMonitor's own venv if it has one, else the current interpreter."""
+    venv_python = STOCKMONITOR_ROOT / ".venv" / "Scripts" / "python.exe"   # Windows
+    if not venv_python.exists():
+        venv_python = STOCKMONITOR_ROOT / ".venv" / "bin" / "python"       # POSIX
+    return str(venv_python) if venv_python.exists() else PYTHON
+
 
 def _stream(label: str, proc: subprocess.Popen, lock: threading.Lock):
     for raw in proc.stdout:
         line = raw.rstrip("\n")
         with lock:
             print(f"[{label}] {line}", flush=True)
+
+
+def _run_one(label: str, cmd: list, cwd, lock: threading.Lock) -> int:
+    """Launch one job, stream its output, and return its exit code."""
+    # The ticker prints status glyphs; force UTF-8 so a cp1252 console
+    # cannot kill it mid-stream (same reason run_ticker.ps1 sets these).
+    env = None
+    if label == "live":
+        env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+    proc = subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        env=env,
+    )
+    with lock:
+        print(f"[run_all] started {label} (pid={proc.pid}): {' '.join(cmd[1:])}", flush=True)
+    _stream(label, proc, lock)
+    return proc.wait()
+
+
+def _run_chain(job, lock: threading.Lock, out: list):
+    """Run a job, then its FOLLOW_ON job (if any), appending (label, code) to out."""
+    label, cmd, cwd = job
+    out.append((label, _run_one(label, cmd, cwd, lock)))
+
+    follow = FOLLOW_ON.get(label)
+    if not follow:
+        return
+    follow_label, script = follow
+    if not STOCKMONITOR_ROOT.exists():
+        with lock:
+            print(f"[run_all] StockMonitor not found — skipping {follow_label}", flush=True)
+        return
+    follow_cmd = [_stockmonitor_python(), "-u", script]
+    out.append((follow_label, _run_one(follow_label, follow_cmd, STOCKMONITOR_ROOT, lock)))
 
 
 def _build_jobs(with_live: bool, live_only: bool, extra_stocks_args: list):
@@ -111,38 +173,18 @@ def main() -> int:
         print("[run_all] the live ticker streams until the market closes — "
               "this will not return until then (Ctrl+C to stop).", flush=True)
 
-    procs: list[tuple[str, subprocess.Popen]] = []
-    for label, cmd, cwd in jobs:
-        # The ticker prints status glyphs; force UTF-8 so a cp1252 console
-        # cannot kill it mid-stream (same reason run_ticker.ps1 sets these).
-        env = None
-        if label == "live":
-            env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
-        proc = subprocess.Popen(
-            cmd,
-            cwd=cwd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            env=env,
-        )
-        procs.append((label, proc))
-        print(f"[run_all] started {label} (pid={proc.pid}): {' '.join(cmd[1:])}", flush=True)
-
     lock = threading.Lock()
+    results: list[list[tuple[str, int]]] = [[] for _ in jobs]
     threads = [
-        threading.Thread(target=_stream, args=(label, proc, lock), daemon=True)
-        for label, proc in procs
+        threading.Thread(target=_run_chain, args=(job, lock, results[i]), daemon=True)
+        for i, job in enumerate(jobs)
     ]
     for t in threads:
         t.start()
-
-    exit_codes: dict[str, int] = {}
-    for label, proc in procs:
-        exit_codes[label] = proc.wait()
     for t in threads:
         t.join()
+
+    exit_codes = {label: code for chain in results for label, code in chain}
 
     print("\n[run_all] summary:")
     for label, code in exit_codes.items():
