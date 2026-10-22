@@ -8,7 +8,8 @@ Run the sheet-update jobs concurrently, and optionally the live ticker.
 
 Each script's stdout/stderr is streamed live, prefixed with its label so
 the output streams remain readable when interleaved. Exit code is the max
-of the child exit codes (non-zero if any failed).
+of the child exit codes (non-zero if any failed). A job that cannot be
+launched at all is logged and listed in the summary with exit -1.
 
 Follow-on jobs
 --------------
@@ -116,10 +117,27 @@ def _run_one(label: str, cmd: list, cwd, lock: threading.Lock) -> int:
     return proc.wait()
 
 
+LAUNCH_FAILED = -1
+
+
+def _run_logged(label: str, cmd: list, cwd, lock: threading.Lock) -> int:
+    """_run_one, but a job that cannot even start is reported as LAUNCH_FAILED.
+
+    This runs inside a chain thread, where an exception would otherwise kill
+    the thread silently and drop the job from the summary.
+    """
+    try:
+        return _run_one(label, cmd, cwd, lock)
+    except Exception as e:
+        with lock:
+            print(f"[run_all] {label} failed to start: {e}", flush=True)
+        return LAUNCH_FAILED
+
+
 def _run_chain(job, lock: threading.Lock, out: list):
     """Run a job, then its FOLLOW_ON job (if any), appending (label, code) to out."""
     label, cmd, cwd = job
-    out.append((label, _run_one(label, cmd, cwd, lock)))
+    out.append((label, _run_logged(label, cmd, cwd, lock)))
 
     follow = FOLLOW_ON.get(label)
     if not follow:
@@ -130,7 +148,7 @@ def _run_chain(job, lock: threading.Lock, out: list):
             print(f"[run_all] StockMonitor not found — skipping {follow_label}", flush=True)
         return
     follow_cmd = [_stockmonitor_python(), "-u", script]
-    out.append((follow_label, _run_one(follow_label, follow_cmd, STOCKMONITOR_ROOT, lock)))
+    out.append((follow_label, _run_logged(follow_label, follow_cmd, STOCKMONITOR_ROOT, lock)))
 
 
 def _build_jobs(with_live: bool, live_only: bool, extra_stocks_args: list):
@@ -185,6 +203,9 @@ def main() -> int:
         t.join()
 
     exit_codes = {label: code for chain in results for label, code in chain}
+    if not exit_codes:
+        print("\n[run_all] no job reported an exit code.", flush=True)
+        return 1
 
     print("\n[run_all] summary:")
     for label, code in exit_codes.items():
@@ -197,7 +218,8 @@ def main() -> int:
         else:
             status = f"FAILED (exit {code})"
         print(f"  {label}: {status}")
-    return max(exit_codes.values())
+    # A launch failure is -1, which max() would rank below success.
+    return max(abs(code) for code in exit_codes.values())
 
 
 if __name__ == "__main__":
