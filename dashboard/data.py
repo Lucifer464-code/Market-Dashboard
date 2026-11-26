@@ -57,7 +57,7 @@ def _spreadsheet():
 
 
 @st.cache_resource
-def _ws(name: str):
+def _real_ws(name: str):
     """Worksheet handle by title, cached per name.
 
     worksheet(name) is itself a round trip (it fetches sheet metadata to
@@ -66,6 +66,144 @@ def _ws(name: str):
     @st.cache_data TTL on the loaders allows — only the connection plumbing
     is reused."""
     return _spreadsheet().worksheet(name)
+
+
+# ── Batched range prefetch ────────────────────────────────
+#
+# The Sheets v4 `values` endpoint charges a flat toll per REQUEST on this
+# project — measured at ~10.5s whether the range is 4 cells or a whole tab,
+# and whether one range is asked for or twenty-four. Reading 4 cells and
+# reading every tab in the spreadsheet both took 10.9s; the cost is the round
+# trip, not the payload.
+#
+# The page used to pay that toll once per loader: ~23 serial reads, so a cold
+# load sat behind roughly four minutes of pure request overhead before the
+# first table rendered. Fetching every range the page needs in a single
+# values:batchGet collapses that to one toll (~11s measured for all 24 tabs,
+# 19,379 cells) — a ~22x speedup on identical data.
+#
+# Loaders are left untouched: `_ws(name)` returns a shim whose `.get(range)`
+# is served from the prefetched payload, so each loader still reads the range
+# it asks for and only falls back to a live request on a cache miss.
+
+# Every (tab, range) the section loaders read. Keep in sync with the loaders
+# below — a range missing here is not an error, it just falls back to its own
+# request (and pays the full toll).
+_PREFETCH_RANGES: list[tuple[str, str]] = [
+    ("S&P500 Sectors",                "B3:K14"),
+    ("Global Indices",                "B4:K17"),
+    ("Global Indices",                "B22:K80"),
+    ("NIFTY Indices",                 "B3:M17"),
+    ("NIFTY Indices",                 "B20:M28"),
+    ("NIFTY Sectors",                 "B3:M17"),
+    ("NIFTY500Moment.50",             "O4:X40"),
+    ("NIFTY500Moment.50",             "B66:E103"),
+    ("NIFTY500Moment.50",             "H66:K83"),
+    ("ETFs US",                       "B2:M210"),
+    ("ETFs US by Sector",             "A3:M400"),
+    ("Leveraged Funds by Theme",      "A3:M400"),
+    ("ETFs US Sector Leaders",        "A3:L400"),
+    ("Leveraged Sector Leaders",      "A3:M400"),
+    ("Biggest Leveraged Funds ",      "A6:M122"),
+    ("ETFs India",                    "B6:L100"),
+    ("Commodity ETFs",                "B3:N40"),
+    ("Biggest Leveraged Funds(Com.)", "A4:N40"),
+    ("Crypto",                        "A103:K118"),
+    ("Mutual Funds India",            "B2:G67"),
+    ("Top G&L US",                    "A4:D19"),
+    ("Top G&L US",                    "F4:I19"),
+    ("Top G&L India",                 "A4:D19"),
+    ("Top G&L India",                 "F4:I19"),
+    ("ATH US",                        "A4:M200"),
+    ("ATH India",                     "A4:M200"),
+    ("Indian Investor Update",        "B2:F500"),
+    ("Hedge Funds ",                  "A4:G15"),
+    ("Top Hedge Fund Investments",    "B1:I11"),
+]
+
+# Tabs whose A1:A2 metadata stamp the page header (load_stocks_metadata).
+_PREFETCH_META_TABS = ["ATH US", "ATH India", "Top G&L US", "Top G&L India"]
+
+
+@st.cache_data(ttl=28800)
+def _prefetch() -> dict:
+    """All page ranges in one values:batchGet, keyed by (tab, range).
+
+    Returns {(sheet_title, range_str): list[list[str]]}. A failure here is
+    non-fatal: an empty dict simply means every loader falls back to its own
+    request, which is the old behaviour.
+    """
+    ranges = list(_PREFETCH_RANGES) + [(t, "A1:A2") for t in _PREFETCH_META_TABS]
+    # Dedupe while preserving order — the response is positional, so the
+    # request list and the keys must line up exactly.
+    seen, ordered = set(), []
+    for key in ranges:
+        if key not in seen:
+            seen.add(key)
+            ordered.append(key)
+
+    try:
+        resp = _http_session().get(
+            f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values:batchGet",
+            params={
+                # Quote the title so names with spaces/punctuation parse, and
+                # majorDimension=ROWS matches what gspread's .get() returns.
+                "ranges":         [f"'{t}'!{r}" for t, r in ordered],
+                "majorDimension": "ROWS",
+            },
+            timeout=180,
+        )
+        resp.raise_for_status()
+        value_ranges = resp.json().get("valueRanges", [])
+    except Exception:
+        return {}
+
+    if len(value_ranges) != len(ordered):
+        # Positional alignment is the only thing tying values back to keys.
+        # If the API returned a different count, trust nothing.
+        return {}
+
+    return {
+        key: vr.get("values", [])
+        for key, vr in zip(ordered, value_ranges)
+    }
+
+
+class _PrefetchedWorksheet:
+    """gspread worksheet stand-in that answers `.get(range)` from the batch.
+
+    Only `.get()` is served locally; everything else proxies to the real
+    worksheet, so callers needing other gspread behaviour are unaffected.
+    """
+
+    __slots__ = ("_title", "_cache", "_real")
+
+    def __init__(self, title: str, cache: dict):
+        self._title = title
+        self._cache = cache
+        self._real  = None
+
+    def _realize(self):
+        if self._real is None:
+            self._real = _real_ws(self._title)
+        return self._real
+
+    def get(self, range_str: str, **kwargs):
+        # kwargs (value_render_option etc.) change what the API returns, so a
+        # prefetched plain-value payload cannot answer those — go live.
+        if not kwargs:
+            hit = self._cache.get((self._title, range_str))
+            if hit is not None:
+                return hit
+        return self._realize().get(range_str, **kwargs)
+
+    def __getattr__(self, item):
+        return getattr(self._realize(), item)
+
+
+def _ws(name: str):
+    """Worksheet handle for `name`, backed by the batched prefetch."""
+    return _PrefetchedWorksheet(name, _prefetch())
 
 
 def _fetch_links(sheet_title: str, range_str: str) -> list[str | None]:

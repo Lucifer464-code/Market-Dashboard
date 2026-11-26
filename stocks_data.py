@@ -9,7 +9,7 @@ Standalone script that updates four Google Sheets:
   4. "ATH India"     — Stocks within 1% of all-time high (India, Rs1000Cr+)
 
 Universes:
-  US    : iShares Russell 3000 ETF holdings CSV (~3000 tickers)
+  US    : yfinance equity screener (US-listed incl. ADRs, above cap floor)
   India : NSE NIFTY Total Market CSV (~1800+ tickers)
 
 Name cache:
@@ -115,14 +115,12 @@ class StocksDataEngine:
     ATH_THRESHOLD = 0.05    # within 5% of all-time high
 
     # ── Data sources ──────────────────────────────────────────
-    # Vanguard VTI (Total Stock Market ETF) — ~3,400 holdings, covers Russell 3000
-    # universe. Switched from iShares IWV in 2026-05 after iShares put the .ajax
-    # CSV endpoint behind a JS/bot wall that returns HTML regardless of headers.
-    US_HOLDINGS_URL = (
-        "https://investor.vanguard.com/investment-products/etfs/profile/"
-        "api/vti/portfolio-holding/stock"
-    )
-    US_HOLDINGS_PAGE_SIZE = 500
+    # US universe comes from yfinance's equity screener: every US-listed stock
+    # (ADRs included) above the cap floor. Fund-holdings scrapes kept breaking —
+    # iShares IWV (2026-05) and then Vanguard VTI (2026-10) both put their
+    # endpoints behind bot walls that return HTML or stall until timeout.
+    US_EXCHANGES = ("NMS", "NGM", "NCM", "NYQ", "ASE", "PCX", "BTS")
+    US_SCREEN_PAGE_SIZE = 250   # yfinance's per-request maximum
     NIFTY_TOTAL_MARKET_URL = (
         "https://nsearchives.nseindia.com/content/indices/ind_niftytotalmarket_list.csv"
     )
@@ -146,6 +144,22 @@ class StocksDataEngine:
 
     # ── Name cache (CSV, permanent) ───────────────────────────
     NAME_CACHE_FILE = "ticker_names.csv"
+
+    # ── Market cap cache (pickle) ─────────────────────────────
+    # Market caps exist only to apply the MCAP_FLOOR filter, and they move far
+    # too slowly to matter over a day: a stock within a rounding error of the
+    # floor is the only case where staleness changes the outcome, and the
+    # margin band below re-checks exactly those. Caching them turns the
+    # universe-wide fast_info sweep (one HTTP round trip per ticker — the
+    # single largest cost in a run) into a sweep over survivors only. On the
+    # US side that is ~49% of 3397 tickers, measured.
+    MCAP_CACHE_FILES     = {"US": "us_mcap_cache.pkl", "IN": "in_mcap_cache.pkl"}
+    MCAP_CACHE_TTL_HOURS = 24
+    # Safety band below the floor. Only caps under floor / MCAP_MARGIN are
+    # trusted as "too small to bother re-checking"; anything nearer the floor
+    # is fetched live, so a stock that genuinely crossed the boundary since the
+    # last run is not excluded on the strength of a stale number.
+    MCAP_MARGIN          = 1.25
 
     # ── Batch settings ────────────────────────────────────────
     # 500-ticker batches reliably trip yfinance's rate limiter: one such
@@ -208,11 +222,58 @@ class StocksDataEngine:
         df = pd.DataFrame(sorted(name_map.items()), columns=["Ticker", "Name"])
         df.to_csv(self.NAME_CACHE_FILE, index=False)
 
+    # ── Market cap cache (pickle) ─────────────────────────────
+
+    def _load_mcap_cache(self, market: str, *, ignore_ttl: bool = False) -> dict:
+        """
+        Cached {ticker: market_cap}, or {} when absent or past its TTL.
+
+        `ignore_ttl` is for the read-modify-write in _save_mcap_cache: an
+        expired cache is too old to *filter* on, but its entries are still the
+        only record of the tickers this run skipped, so discarding them on
+        merge would shrink the file to the candidate set.
+        """
+        path = self.MCAP_CACHE_FILES.get(market)
+        if not path or not os.path.exists(path):
+            return {}
+        age_h = (time.time() - os.path.getmtime(path)) / 3600
+        if not ignore_ttl and age_h > self.MCAP_CACHE_TTL_HOURS:
+            return {}
+        try:
+            with open(path, "rb") as f:
+                cached = pickle.load(f)
+            return cached if isinstance(cached, dict) else {}
+        except Exception as e:
+            print(f"  [WARN] Could not load market cap cache: {e}")
+            return {}
+
+    def _save_mcap_cache(self, market: str, mcap_map: dict):
+        """
+        Merge freshly fetched caps into the cache, keeping entries for tickers
+        this run skipped.
+
+        Merging rather than overwriting is what makes the cache stable: a run
+        only fetches candidates, so writing just those would drop every skipped
+        ticker's cap, and the next run — finding nothing cached for them —
+        would fetch the whole universe again. The file is rewritten wholesale,
+        which also refreshes its mtime, so the TTL tracks the newest data.
+        """
+        path = self.MCAP_CACHE_FILES.get(market)
+        if not path or not mcap_map:
+            return
+        try:
+            merged = self._load_mcap_cache(market, ignore_ttl=True)
+            merged.update(mcap_map)
+            with open(path, "wb") as f:
+                pickle.dump(merged, f)
+        except Exception as e:
+            print(f"  [WARN] Could not save market cap cache: {e}")
+
     # ── Universe: Russell 3000 ────────────────────────────────
 
     def _fetch_russell3000(self) -> tuple:
         """
-        Fetch US universe from Vanguard VTI portfolio-holdings JSON API.
+        Fetch US universe from the yfinance equity screener.
         Returns (tickers, name_map) — same contract as before; the method name
         is kept for backward compatibility with the cache file and call site.
         On fetch failure, falls back to the pickle cache even if stale.
@@ -227,50 +288,48 @@ class StocksDataEngine:
             print(f"  US universe: using cache ({len(tickers)} tickers)")
             return tickers, name_map
 
-        print("  Downloading US universe (Vanguard VTI)...")
+        print("  Downloading US universe (yfinance screener)...")
         try:
-            holdings = []
-            start = 1
+            # Screen at floor / MCAP_MARGIN, not the floor itself: stocks just
+            # under it still reach the fast_info sweep, which applies the exact
+            # floor on live caps (same band as _prefilter_by_cached_mcap).
+            query = yf.EquityQuery("and", [
+                yf.EquityQuery("eq", ["region", "us"]),
+                yf.EquityQuery("is-in", ["exchange", *self.US_EXCHANGES]),
+                yf.EquityQuery("gte", ["intradaymarketcap",
+                                       self.US_MCAP_FLOOR / self.MCAP_MARGIN]),
+            ])
+            quotes, offset = [], 0
             while True:
-                url = (
-                    f"{self.US_HOLDINGS_URL}"
-                    f"?start={start}&count={self.US_HOLDINGS_PAGE_SIZE}"
-                )
-                r = requests.get(
-                    url,
-                    headers={**self.HEADERS, "Accept": "application/json"},
-                    timeout=30,
-                )
-                r.raise_for_status()
-                page = r.json().get("fund", {}).get("entity", []) or []
-                if not page:
+                resp = yf.screen(query, offset=offset, size=self.US_SCREEN_PAGE_SIZE,
+                                 sortField="intradaymarketcap", sortAsc=False)
+                page = resp.get("quotes", []) or []
+                quotes.extend(page)
+                if len(page) < self.US_SCREEN_PAGE_SIZE:
                     break
-                holdings.extend(page)
-                if len(page) < self.US_HOLDINGS_PAGE_SIZE:
-                    break
-                start += self.US_HOLDINGS_PAGE_SIZE
+                offset += self.US_SCREEN_PAGE_SIZE
 
-            df = pd.DataFrame(holdings)
-            if df.empty or "ticker" not in df.columns:
-                raise RuntimeError("Vanguard VTI response missing ticker column")
+            # Common stock and ADRs only. Class shares keep yfinance's hyphen
+            # form (BRK-B), which is what the price download expects. The
+            # screener also tags preferreds as EQUITY (JPM-PC, BML-PG); those
+            # carry a multi-letter suffix, so only a single-letter class passes.
+            tickers, name_map = [], {}
+            for q in quotes:
+                t = str(q.get("symbol", "")).strip().upper()
+                if q.get("quoteType") != "EQUITY" or not t or t in name_map:
+                    continue
+                base, _, cls = t.partition("-")
+                if not base.isalpha() or (cls and not (len(cls) == 1 and cls.isalpha())):
+                    continue
+                # Prefer longName ("NVIDIA Corp.") over shortName ("NVIDIA CORP")
+                name = q.get("longName") or q.get("shortName") or t
+                tickers.append(t)
+                name_map[t] = str(name).strip().title()
 
-            df["Ticker"] = df["ticker"].astype(str).str.strip().str.upper()
-            # Prefer longName ("NVIDIA Corp.") over shortName ("NVIDIA CORP")
-            name_col = "longName" if "longName" in df.columns else "shortName"
-            df["Name"] = df[name_col].astype(str).str.strip().str.title()
+            if not tickers:
+                raise RuntimeError("yfinance screener returned no US equities")
 
-            # Filter to clean equity tickers (alpha, <=5 chars, drop placeholders)
-            df = df[
-                df["Ticker"].apply(
-                    lambda t: bool(t and t != "-" and t.isalpha() and len(t) <= 5)
-                )
-            ]
-            df = df.drop_duplicates(subset=["Ticker"], keep="first")
-
-            name_map = dict(zip(df["Ticker"], df["Name"]))
-            tickers = df["Ticker"].tolist()
-
-            print(f"  US universe: {len(tickers)} tickers, {len(name_map)} names loaded from VTI")
+            print(f"  US universe: {len(tickers)} tickers, {len(name_map)} names loaded from yfinance")
             self._save_pkl_cache(self.US_CACHE_FILE, (tickers, name_map))
             return tickers, name_map
 
@@ -358,6 +417,40 @@ class StocksDataEngine:
             return [], {}
 
     # ── Market cap prefetch ───────────────────────────────────
+
+    def _prefilter_by_cached_mcap(self, tickers: list, floor: float,
+                                  market: str) -> tuple:
+        """
+        Split the universe using yesterday's market caps.
+
+        Returns (candidates, skipped). A ticker is skipped only when a cached
+        cap puts it clearly below the floor — under floor / MCAP_MARGIN, i.e.
+        far enough below that a day's move could not carry it over. Caps inside
+        that margin band, and tickers with no cached cap at all, stay in
+        `candidates` and are fetched live, so the filter can only be wrong
+        about a stock that gained more than 25% in a day from below the band.
+
+        The division matters: the band has to sit BELOW the floor. Multiplying
+        instead would skip tickers between the floor and floor * margin —
+        stocks that pass the filter — silently dropping them from the sheet.
+
+        Skipped tickers never reach the price stage, which is correct: they
+        would have been dropped by the same floor after a live fetch.
+        """
+        cache = self._load_mcap_cache(market)
+        if not cache:
+            return list(tickers), []
+
+        threshold  = floor / self.MCAP_MARGIN
+        candidates = []
+        skipped    = []
+        for t in tickers:
+            cap = cache.get(t)
+            if cap is not None and cap < threshold:
+                skipped.append(t)
+            else:
+                candidates.append(t)
+        return candidates, skipped
 
     def _fetch_market_caps(self, tickers: list) -> tuple:
         """
@@ -1436,23 +1529,32 @@ class StocksDataEngine:
         if not run_us:
             print("--- US: skipped ---\n")
         else:
-            print("--- US (Russell 3000) ---")
+            print("--- US (yfinance screener) ---")
             us_tickers, us_name_map = self._fetch_russell3000()
 
             if us_tickers:
-                # Always overwrite from Vanguard VTI — authoritative source,
+                # Always overwrite from the screener — authoritative source,
                 # ensures any bad ticker=ticker entries get corrected immediately
                 updated = sum(1 for t, n in us_name_map.items() if name_cache.get(t) != n)
                 name_cache.update(us_name_map)
                 if updated:
                     self._save_name_cache(name_cache)
-                    print(f"  Seeded/updated {updated} US names from iShares CSV")
+                    print(f"  Seeded/updated {updated} US names from yfinance screener")
                 else:
                     print(f"  US names: all {len(us_tickers)} already up-to-date")
 
+                # Drop the clearly-too-small using yesterday's caps, so the
+                # fast_info sweep only pays for plausible candidates.
+                us_candidates, us_skipped = self._prefilter_by_cached_mcap(
+                    us_tickers, self.US_MCAP_FLOOR, "US")
+                if us_skipped:
+                    print(f"  Cached caps: skipping {len(us_skipped)} ticker(s) "
+                          f"well below the ${self.US_MCAP_FLOOR/1e9:.0f}B floor")
+
                 # Fetch market caps + live prices in one pass, then filter universe
-                us_mcaps, us_live, us_prev = self._fetch_market_caps(us_tickers)
-                us_filtered = [t for t in us_tickers if us_mcaps.get(t, 0) >= self.US_MCAP_FLOOR]
+                us_mcaps, us_live, us_prev = self._fetch_market_caps(us_candidates)
+                self._save_mcap_cache("US", us_mcaps)
+                us_filtered = [t for t in us_candidates if us_mcaps.get(t, 0) >= self.US_MCAP_FLOOR]
                 print(f"  Market cap filter: {len(us_filtered)}/{len(us_tickers)} tickers pass ${self.US_MCAP_FLOOR/1e9:.0f}B floor")
 
                 if run_gl:
@@ -1492,9 +1594,18 @@ class StocksDataEngine:
                 else:
                     print(f"  India names: all {len(in_tickers)} already up-to-date")
 
+                # Drop the clearly-too-small using yesterday's caps, so the
+                # fast_info sweep only pays for plausible candidates.
+                in_candidates, in_skipped = self._prefilter_by_cached_mcap(
+                    in_tickers, self.IN_MCAP_FLOOR, "IN")
+                if in_skipped:
+                    print(f"  Cached caps: skipping {len(in_skipped)} ticker(s) "
+                          f"well below the Rs{self.IN_MCAP_FLOOR/1e7:.0f}Cr floor")
+
                 # Fetch market caps + live prices in one pass, then filter universe
-                in_mcaps, in_live, in_prev = self._fetch_market_caps(in_tickers)
-                in_filtered = [t for t in in_tickers if in_mcaps.get(t, 0) >= self.IN_MCAP_FLOOR]
+                in_mcaps, in_live, in_prev = self._fetch_market_caps(in_candidates)
+                self._save_mcap_cache("IN", in_mcaps)
+                in_filtered = [t for t in in_candidates if in_mcaps.get(t, 0) >= self.IN_MCAP_FLOOR]
                 print(f"  Market cap filter: {len(in_filtered)}/{len(in_tickers)} tickers pass Rs{self.IN_MCAP_FLOOR/1e7:.0f}Cr floor")
 
                 if run_gl:

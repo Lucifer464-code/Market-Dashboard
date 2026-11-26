@@ -89,6 +89,9 @@ st.markdown(
 /* Hide sidebar collapse button */
 [data-testid="stSidebarCollapseButton"] { display: none !important; }
 
+/* Selectbox: hide the search-input caret that lingers after clicking */
+[data-baseweb="select"] input { caret-color: transparent !important; }
+
 /* Main background */
 [data-testid="stAppViewContainer"] { background: #f8fafc; }
 [data-testid="block-container"] { background: transparent; padding-top: 0 !important; }
